@@ -2,6 +2,7 @@
 // so the page can show what is happening while it waits.
 
 import { imageSize } from 'image-size';
+import { parseBuffer } from 'music-metadata';
 import { readLink } from './scrape.js';
 import { writeStoryboard, sanitizeStoryboard, LENGTHS } from './creative.js';
 import { compose, setupCommands, sceneDuration, FORMATS, STYLES, TRACK_ORDER } from './compose.js';
@@ -75,6 +76,35 @@ async function findFootage(vidmoat, query, format, seconds) {
 
 const MAX_FOOTAGE = 3;
 
+export const VOICES = {
+  marin: 'Marin · warm', cedar: 'Cedar · steady', nova: 'Nova · bright', onyx: 'Onyx · deep', coral: 'Coral · friendly', ash: 'Ash · crisp',
+};
+const DELIVERY = 'An advert narrator: confident, warm and clear, at a natural pace. No sing-song.';
+
+/**
+ * Speak each scene's line. `existing` lets a rebuild keep every line whose words
+ * did not change, so editing one scene pays for one line, not all of them.
+ * Returns an array aligned with the scenes; null where a scene has no narration.
+ */
+async function recordVoices(vidmoat, storyboard, voiceId, { existing = [], fetchImpl = fetch, log = () => {} } = {}) {
+  return Promise.all(storyboard.scenes.map(async (scene) => {
+    if (!scene.voice) return null;
+    const kept = existing.find((v) => v && v.text === scene.voice && v.voiceId === voiceId);
+    if (kept) return kept;
+    try {
+      const out = await vidmoat.createSpeech(scene.voice, { voiceId, instructions: DELIVERY });
+      const res = await fetchImpl(out.url, { signal: AbortSignal.timeout(30_000) });
+      const meta = await parseBuffer(new Uint8Array(await res.arrayBuffer())).catch(() => null);
+      // If the file cannot be measured, estimate from the words: about 2.6 a second.
+      const duration = meta?.format?.duration || Math.max(1.5, scene.voice.split(' ').length / 2.6);
+      return { src: out.url, duration: Math.round(duration * 100) / 100, text: scene.voice, voiceId };
+    } catch (err) {
+      log(`voice: ${err.message}`);
+      return null;
+    }
+  }));
+}
+
 /** Fetch a backdrop for each scene that asked for one, and point the scene at it. */
 async function attachFootage(vidmoat, storyboard, format, log) {
   const wanted = storyboard.scenes.filter((sc) => sc.visual && sc.image < 0).slice(0, MAX_FOOTAGE);
@@ -112,7 +142,8 @@ async function applyAll(vidmoat, projectId, commands) {
 function tracksFromDocument(document) {
   const tracks = {};
   for (const track of document.tracks ?? []) if (TRACK_ORDER.includes(track.label)) tracks[track.label] = track.id;
-  const missing = TRACK_ORDER.filter((name) => tracks[name] === undefined);
+  // Projects made before narration existed have no voice track; they simply stay silent.
+  const missing = TRACK_ORDER.filter((name) => name !== 'voice' && tracks[name] === undefined);
   if (missing.length) throw new Error(`This project was not made here (missing tracks: ${missing.join(', ')})`);
   return tracks;
 }
@@ -157,12 +188,16 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   emit('write', 'done', source === 'claude' ? `${storyboard.scenes.length} scenes` : 'Written from the page text');
 
   emit('build', 'active');
-  const [created, music, footage] = await Promise.all([
+  const voiceId = VOICES[input.voice] ? input.voice : 'marin';
+  const [created, music, footage, voices] = await Promise.all([
     vidmoat.createProject(`LinkReel · ${storyboard.brandName} · ${FORMATS[format].aspectRatio}`, setupCommands(format, storyboard.palette.background)),
     input.music === false ? null : findMusic(vidmoat, storyboard.musicQuery, 30).catch((err) => { log(`music: ${err.message}`); return null; }),
     attachFootage(vidmoat, storyboard, format, log),
+    input.voiceover === false ? [] : recordVoices(vidmoat, storyboard, voiceId, { fetchImpl, log }),
   ]);
   assets.footage = footage;
+  assets.voices = voices;
+  assets.voiceId = voices.some(Boolean) ? voiceId : null;
   const projectId = created.project.id;
   const trackIds = (created.results ?? []).filter((r) => r.op === 'addTrack' && r.ok).map((r) => r.data?.trackId);
   if (trackIds.length !== TRACK_ORDER.length || trackIds.some((id) => typeof id !== 'number')) {
@@ -171,7 +206,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   const tracks = Object.fromEntries(TRACK_ORDER.map((name, i) => [name, trackIds[i]]));
   const canvas = { width: created.project.settings.width, height: created.project.settings.height };
 
-  const composed = compose({ storyboard, images: assets.images, footage, logo: assets.logo, canvas, format, style, tracks, music, domain: brief.domain });
+  const composed = compose({ storyboard, images: assets.images, footage, voices, logo: assets.logo, canvas, format, style, tracks, music, domain: brief.domain });
   const { problems, lint } = await applyAll(vidmoat, projectId, composed.commands);
   const document = await vidmoat.getDocument(projectId);
   emit('build', 'done', `${composed.duration.toFixed(1)}s`);
@@ -185,7 +220,7 @@ function checkAsset(asset) {
 }
 
 /** Re-lay an existing project from an edited storyboard. Nothing is re-imported or re-written by the model. */
-export async function rebuildVideo(input, { vidmoat }) {
+export async function rebuildVideo(input, { vidmoat, fetchImpl, log = () => {} }) {
   const format = FORMATS[input.format] ? input.format : 'vertical';
   const style = STYLES[input.style] ? input.style : 'sleek';
   // Media can only be files already in the Vidmoat library, never an arbitrary URL.
@@ -204,12 +239,18 @@ export async function rebuildVideo(input, { vidmoat }) {
   const tracks = tracksFromDocument(before);
   const canvas = { width: before.settings.width, height: before.settings.height };
   const domain = String(input.domain ?? '').replace(/[^a-z0-9.-]/gi, '').slice(0, 80);
-  const composed = compose({ storyboard, images, footage, logo, canvas, format, style, tracks, music, domain });
+  // Narration: keep the lines that still match, re-record the ones whose words changed.
+  const voiceId = VOICES[input.assets?.voiceId] ? input.assets.voiceId : null;
+  const existing = (Array.isArray(input.assets?.voices) ? input.assets.voices : []).slice(0, 12)
+    .filter((v) => v && typeof v.src === 'string' && v.src.startsWith(MEDIA_PREFIX) && Number.isFinite(v.duration) && v.duration > 0 && v.duration < 60)
+    .map(({ src, duration, text, voiceId: id }) => ({ src, duration, text: String(text ?? ''), voiceId: id }));
+  const voices = voiceId && tracks.voice !== undefined ? await recordVoices(vidmoat, storyboard, voiceId, { existing, fetchImpl, log }) : [];
+  const composed = compose({ storyboard, images, footage, voices, logo, canvas, format, style, tracks, music, domain });
   const { problems, lint } = await applyAll(vidmoat, input.projectId, [
     { op: 'clearTimeline' },
     { op: 'setProjectSettings', background: storyboard.palette.background },
     ...composed.commands,
   ]);
   const document = await vidmoat.getDocument(input.projectId);
-  return describe({ projectId: input.projectId, storyboard, assets: { images, logo, footage }, music, composed, document, lint, problems, format, style });
+  return describe({ projectId: input.projectId, storyboard, assets: { images, logo, footage, voices, voiceId: voices.some(Boolean) ? voiceId : null }, music, composed, document, lint, problems, format, style });
 }

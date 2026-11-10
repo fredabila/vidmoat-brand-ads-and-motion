@@ -59,6 +59,10 @@ async function loadConfig() {
   options($('styles'), 'style', config.styles, store.get('style') ?? 'sleek', styleCard);
   options($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes`, small: l.label })), store.get('length') ?? 'standard', segment);
   options($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad', segment);
+  $('voice').replaceChildren(...(config.voices ?? []).map((v) => Object.assign(document.createElement('option'), { value: v.id, textContent: v.label })));
+  if (store.get('voice')) $('voice').value = store.get('voice');
+  $('voiceover').checked = store.get('voiceover') !== 'off';
+  $('voice').disabled = !$('voiceover').checked;
   $('accessRow').hidden = !config.needsAccessCode;
   $('access').value = store.get('access') ?? '';
   const notes = [];
@@ -109,6 +113,8 @@ async function make(event) {
   showFormError(null);
   for (const name of ['format', 'style', 'length', 'goal']) store.set(name, picked(name));
   store.set('access', $('access').value);
+  store.set('voice', $('voice').value);
+  store.set('voiceover', $('voiceover').checked ? 'on' : 'off');
 
   state.busy = true;
   $('go').disabled = true;
@@ -124,7 +130,7 @@ async function make(event) {
     const res = await fetch('/api/videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Access-Code': $('access').value },
-      body: JSON.stringify({ url, format: picked('format'), style: picked('style'), length: picked('length'), goal: picked('goal'), music: $('music').checked }),
+      body: JSON.stringify({ url, format: picked('format'), style: picked('style'), length: picked('length'), goal: picked('goal'), music: $('music').checked, voiceover: $('voiceover').checked, voice: $('voice').value }),
     });
     if (!res.ok) {
       failure = (await res.json().catch(() => ({}))).error ?? `The server answered ${res.status}.`;
@@ -181,7 +187,8 @@ function showVideo(video, { fresh = false } = {}) {
   $('notices').replaceChildren(...notices.slice(0, 6).map((text) => Object.assign(document.createElement('li'), { textContent: text })));
 
   renderBoard(v);
-  $('musicCredit').textContent = v.music ? `Music: “${v.music.name}”${v.music.credit ? ` by ${v.music.credit}` : ''} (CC0 stock).` : '';
+  const spoken = (v.assets?.voices ?? []).filter(Boolean).length;
+  $('musicCredit').textContent = (spoken ? `Narration: ${spoken} line${spoken === 1 ? '' : 's'}, AI voice. Changing a line re-records it when you apply. ` : '') + (v.music ? `Music: “${v.music.name}”${v.music.credit ? ` by ${v.music.credit}` : ''} (CC0 stock).` : '');
 
   if (fresh) {
     resetRender();
@@ -256,6 +263,9 @@ function renderBoard(v) {
       );
     }
     fields.append(row);
+    if (v.assets?.voiceId) {
+      fields.append(field('Narration', scene.voice, (val) => { scene.voice = val; }, { maxLength: 220 }));
+    }
     li.append(jump, fields);
     return li;
   }));
@@ -464,6 +474,7 @@ async function render() {
 // ---------- Wiring ----------
 
 $('make').addEventListener('submit', make);
+$('voiceover').addEventListener('change', () => { $('voice').disabled = !$('voiceover').checked; });
 $('apply').addEventListener('click', applyChanges);
 $('brandName').addEventListener('input', markDirty);
 $('playBtn').addEventListener('click', togglePlay);

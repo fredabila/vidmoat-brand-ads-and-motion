@@ -127,6 +127,8 @@ legend span { color: var(--hot); margin-right: 6px; }
 .extras { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 20px; }
 .check { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; font-weight: 500; }
 .check input { accent-color: var(--hot); width: 17px; height: 17px; }
+.pick select { background: var(--card); border: 2px solid var(--line); border-radius: 10px; padding: 7px 10px; font: 600 13px/1.2 var(--body); color: var(--ink); cursor: pointer; }
+.pick select:disabled { opacity: 0.45; cursor: not-allowed; }
 .access { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--ink-2); }
 .access input, .field input, .scene input { background: #fff; border: 1.5px solid var(--line); border-radius: 10px; padding: 9px 11px; width: 100%; outline: 0; transition: border-color 0.15s; }
 .access input { max-width: 200px; }

@@ -28,6 +28,7 @@ const SceneSchema = z.object({
   highlight: z.string().describe('One word or short phrase copied exactly from the headline to colour as the emphasis. Empty string for none.'),
   sub: z.string().describe('A supporting line, at most 12 words. Empty string for none.'),
   image: z.number().int().describe('Index of the image to show in this scene, or -1 for none.'),
+  voice: z.string().describe('What the narrator says over this scene: one natural spoken sentence of 8 to 16 words. It should add to the words on screen, not read them out, and the scenes should flow into each other as one script when read in order.'),
   visual: z.string().describe('For hook and feature scenes with image -1: 2 to 4 plain words to search stock footage for a moving backdrop that fits the line, like "hands typing laptop" or "runner at sunrise". Empty string when the scene should be type only.'),
   statValue: z.number().describe('stat scenes only: the number, taken from the page. 0 otherwise.'),
   statPrefix: z.string().describe('stat scenes only: up to 2 characters before the number, like "$". Empty otherwise.'),
@@ -68,6 +69,7 @@ Rules that matter, and why:
 - Use at most one list and one quote. A good eight-scene video might be: hook, feature, stat, feature, list, quote, feature, cta.
 - Variety keeps people watching. Do not make every scene the same kind of frame: mix scenes that show a page picture, scenes over stock footage (give visual a search phrase for a concrete, filmable subject: people, places, objects, never abstract ideas or brand names), and one or two scenes of type alone. Give at most three scenes a visual.
 - Pick a palette that feels like this brand, starting from the theme colour and page colours when they are given. Text must be clearly readable on the background, and the accent must stand out against it.
+- The narration follows the same rule as the screen: only what the page says. Write it to be spoken: short, plain, no symbols, numbers as a person would say them.
 - Write in the language of the page.`;
 
 export function buildUserPrompt(brief, { goal, sceneCount, format }) {
@@ -200,6 +202,7 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
       highlight: highlight && headline.toLowerCase().includes(highlight.toLowerCase()) ? highlight : '',
       sub: tidy(s?.sub, 14, 96),
       image: usable(s?.image) ? s.image : -1,
+      voice: String(s?.voice ?? '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 30).join(' ').slice(0, 220),
       visual: (kind === 'hook' || kind === 'feature') && !usable(s?.image) ? tidy(s?.visual, 5, 48) : '',
       footage: Number.isInteger(s?.footage) && s.footage >= 0 && s.footage < (brief.footage?.length ?? 0) && !usable(s?.image) ? s.footage : -1,
       statValue: kind === 'stat' ? Math.min(statValue, 999_999_999) : 0,
@@ -215,9 +218,9 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
   // Shape: one hook first, one cta last, the right number in between.
   const middle = scenes.filter((s) => s.kind !== 'hook' && s.kind !== 'cta').slice(0, Math.max(sceneCount - 2, 0));
   const hook = scenes.find((s) => s.kind === 'hook') ??
-    { kind: 'hook', headline: tagline || brandName, items: [], highlight: '', sub: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
+    { kind: 'hook', headline: tagline || brandName, items: [], highlight: '', sub: '', voice: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
   const cta = scenes.find((s) => s.kind === 'cta') ??
-    { kind: 'cta', headline: tagline || brandName, items: [], highlight: '', sub: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
+    { kind: 'cta', headline: tagline || brandName, items: [], highlight: '', sub: '', voice: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
   if (!cta.cta) cta.cta = 'Learn more';
   scenes = [hook, ...middle, cta];
 
@@ -247,9 +250,9 @@ export function heuristicStoryboard(brief, { sceneCount }) {
     palette: { ...FALLBACK_PALETTE, ...(accent ? { accent } : {}) },
     musicQuery: 'upbeat background',
     scenes: [
-      { kind: 'hook', headline: limitWords(brief.title.split(/[|–—·]\s/)[0], 7), sub: limitWords(brief.description, 12), image: brief.images.length ? 0 : -1 },
-      ...picks.map((headline, i) => ({ kind: 'feature', headline, sub: '', image: brief.images.length > i + 1 ? i + 1 : -1 })),
-      { kind: 'cta', headline: brief.siteName, sub: brief.domain, image: -1, cta: brief.buttons[0] || 'Learn more' },
+      { kind: 'hook', headline: limitWords(brief.title.split(/[|–—·]\s/)[0], 7), sub: limitWords(brief.description, 12), image: brief.images.length ? 0 : -1, voice: limitWords(brief.description || brief.title, 22) },
+      ...picks.map((headline, i) => ({ kind: 'feature', headline, voice: headline, sub: '', image: brief.images.length > i + 1 ? i + 1 : -1 })),
+      { kind: 'cta', headline: brief.siteName, voice: `Find out more at ${brief.domain}`, sub: brief.domain, image: -1, cta: brief.buttons[0] || 'Learn more' },
     ],
   }, brief, { sceneCount });
 }

@@ -87,3 +87,24 @@ test('timing and emphasis helpers', () => {
   assert.equal(highlightSpan('Sapphire tough display', 'missing'), null);
   assert.ok(layoutFor('wide', FORMATS.wide).feature.length === 2);
 });
+
+test('narration stretches a scene to its line and the music ducks under it', () => {
+  const voices = [{ src: 'https://api.vidmoat.com/uploads/v0.mp3', duration: 7.5 }, null, { src: 'https://api.vidmoat.com/uploads/v2.mp3', duration: 1.2 }];
+  const withVoice = compose({ storyboard, images, voices, canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks: { ...tracks, voice: 7 }, music: { src: 'https://api.vidmoat.com/uploads/m.mp3' }, domain: '' });
+  const silent = build('vertical', 'sleek');
+  assert.ok(withVoice.timeline[0].duration >= 7.5 + 0.25 + 0.35 - 0.001, 'scene waits for its line');
+  assert.equal(withVoice.timeline[2].duration, silent.timeline[2].duration, 'a short line does not shorten a scene');
+  const audio = withVoice.commands.filter((c) => c.type === 'audio');
+  assert.deepEqual(audio.map((c) => c.clipId), ['s0_voice', 's2_voice']);
+  assert.ok(audio.every((c) => c.trackIndex === 7));
+  for (const a of audio) {
+    const sc = withVoice.timeline[Number(a.clipId[1])];
+    assert.ok(a.start >= sc.start && a.start + a.duration <= sc.start + sc.duration, 'the line stays inside its scene');
+  }
+  const bed = withVoice.commands.at(-1);
+  assert.equal(bed.duck, true);
+  assert.deepEqual(bed.voiceClipIds, ['s0_voice', 's2_voice']);
+  // Without a voice track (a project made before narration) the lines are left out.
+  const old = compose({ storyboard, images, voices, canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks, music: null, domain: '' });
+  assert.equal(old.commands.filter((c) => c.type === 'audio').length, 0);
+});

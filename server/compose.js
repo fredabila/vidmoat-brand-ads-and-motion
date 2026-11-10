@@ -35,7 +35,7 @@ export const STYLES = {
 };
 
 /** Created in this order after the default tracks, so later names draw on top. */
-export const TRACK_ORDER = ['back', 'media', 'front'];
+export const TRACK_ORDER = ['back', 'media', 'front', 'voice'];
 
 const round = (n) => Math.round(n * 100) / 100;
 
@@ -147,7 +147,7 @@ export function themeFor(palette, name) {
  * @param {{src:string}|null} input.music
  * @param {string} input.domain
  */
-export function compose({ storyboard, images = [], footage = [], logo = null, canvas, format = 'vertical', style = 'sleek', tracks, music = null, domain = '' }) {
+export function compose({ storyboard, images = [], footage = [], voices = [], logo = null, canvas, format = 'vertical', style = 'sleek', tracks, music = null, domain = '' }) {
   const lookName = LOOKS[style] ? style : 'sleek';
   const look = LOOKS[lookName];
   const layout = layoutFor(format, canvas);
@@ -160,6 +160,7 @@ export function compose({ storyboard, images = [], footage = [], logo = null, ca
   const centre = (rect) => ({ x: Math.round(rect.x + rect.width / 2 - W / 2), y: Math.round(rect.y + rect.height / 2 - H / 2) });
 
   let t = 0;
+  const voiceIds = [];
   let featureIndex = 0;
   let soloIndex = 0;
   let lastTheme = 'base';
@@ -170,7 +171,14 @@ export function compose({ storyboard, images = [], footage = [], logo = null, ca
     const id = `s${i}`;
     const last = i === count - 1;
     // The closing card holds a little longer so the button can be read.
-    const d = round(sceneDuration(scene) + (last ? 0.4 : 0));
+    // A narrated scene lasts as long as its line takes to say, plus room to breathe.
+    const line = tracks.voice !== undefined ? voices[i] : null;
+    const voiceAt = i > 0 ? 0.42 : 0.25;
+    const d = round(Math.max(sceneDuration(scene) + (last ? 0.4 : 0), line ? line.duration + voiceAt + (last ? 0.9 : 0.35) : 0));
+    if (line) {
+      voiceIds.push(`${id}_voice`);
+      push({ op: 'addClip', clipId: `${id}_voice`, type: 'audio', name: `Narration ${i + 1}`, src: line.src, start: round(t + voiceAt), duration: round(line.duration), mediaStart: 0, mediaDuration: line.duration, trackIndex: tracks.voice });
+    }
     const image = scene.image >= 0 ? images[scene.image] : null;
     timeline.push({ index: i, kind: scene.kind, start: round(t), duration: d });
     const enter = i > 0 ? 0.42 : 0; // how long the incoming wipe covers the frame
@@ -242,7 +250,7 @@ export function compose({ storyboard, images = [], footage = [], logo = null, ca
       const cover = round(Math.max(W / clip.width, H / clip.height) / Math.min(W / clip.width, H / clip.height));
       push({
         op: 'addClip', clipId: `${id}_vid`, type: 'video', src: clip.src, start: round(t), duration: d, trackIndex: tracks.media,
-        mediaStart: 0, mediaDuration: clip.duration, patch: { scale: cover, muted: true, volume: 0 },
+        mediaStart: 0, mediaDuration: clip.duration, patch: { scale: cover, muted: true, volume: 0, ...(clip.duration < d ? { loop: true } : {}) },
       });
       push({
         op: 'setKeyframeTrack', clipId: `${id}_vid`, prop: 'scale',
@@ -289,7 +297,10 @@ export function compose({ storyboard, images = [], footage = [], logo = null, ca
     if (cmd.op.startsWith('add') && typeof cmd.duration === 'number') cmd.duration = Math.round((cmd.duration - 0.000001) * 1e6) / 1e6;
   }
   if (music?.src) {
-    push({ op: 'musicBed', clipId: 'music', src: music.src, volume: 0.32, fadeIn: 0.6, fadeOut: 1.4, duck: false, end: duration });
+    // Under narration the bed sits lower and ducks beneath each line.
+    push(voiceIds.length
+      ? { op: 'musicBed', clipId: 'music', src: music.src, volume: 0.26, fadeIn: 0.6, fadeOut: 1.4, duck: true, voiceClipIds: voiceIds, end: duration }
+      : { op: 'musicBed', clipId: 'music', src: music.src, volume: 0.32, fadeIn: 0.6, fadeOut: 1.4, duck: false, end: duration });
   }
   return { commands, duration, timeline };
 }
@@ -299,6 +310,6 @@ export function setupCommands(format, background) {
   const f = FORMATS[format] ?? FORMATS.vertical;
   return [
     { op: 'setProjectSettings', aspectRatio: f.aspectRatio, fps: 30, background },
-    ...TRACK_ORDER.map((name) => ({ op: 'addTrack', type: 'video', label: name })),
+    ...TRACK_ORDER.map((name) => ({ op: 'addTrack', type: name === 'voice' ? 'audio' : 'video', label: name })),
   ];
 }
