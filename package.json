@@ -1,0 +1,22 @@
+{
+  "name": "linkreel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Paste a link, get a motion video or ad. Built on the Vidmoat developer API and Claude.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "cheerio": "^1.2.0",
+    "express": "^5.3.0",
+    "image-size": "^2.1.0",
+    "zod": "^4.6.7"
+  }
+}

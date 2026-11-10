@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LinkReel: paste a link, get an ad</title>
+  <meta name="description" content="Paste a link to any product or website and get a motion video or ad in seconds.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff5a36'/%3E%3Cpath d='M12 9.5v13l11-6.5z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" aria-label="LinkReel home">
+      <span class="mark" aria-hidden="true"></span>LinkReel
+    </a>
+    <span class="powered">Built on the Vidmoat API and Claude</span>
+  </header>
+
+  <main>
+    <section class="hero" id="hero">
+      <h1>Paste a link.<br><em>Get an ad.</em></h1>
+      <p class="lede">Drop in a product page or website. LinkReel reads it, writes the script, and builds a motion video in the brand's own colours and pictures.</p>
+
+      <form id="make" class="make" novalidate>
+        <div class="linkbar">
+          <label class="sr" for="url">Link to a product page or website</label>
+          <input id="url" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false"
+                 placeholder="https://yourbrand.com/product" required>
+          <button id="go" type="submit">Make my video</button>
+        </div>
+        <p id="formError" class="error" role="alert" hidden></p>
+
+        <div class="options">
+          <fieldset>
+            <legend>Format</legend>
+            <div class="chips" id="formats"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Style</legend>
+            <div class="chips" id="styles"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Length</legend>
+            <div class="chips" id="lengths"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Goal</legend>
+            <div class="chips" id="goals"></div>
+          </fieldset>
+        </div>
+        <label class="check"><input type="checkbox" id="music" checked> Add a music bed</label>
+        <div id="accessRow" class="access" hidden>
+          <label for="access">Access code</label>
+          <input id="access" type="password" autocomplete="off">
+        </div>
+      </form>
+
+      <p id="setupNote" class="note" hidden></p>
+    </section>
+
+    <section id="progress" class="progress" hidden aria-live="polite">
+      <h2>Making your video</h2>
+      <ol id="steps">
+        <li data-step="read"><span class="dot"></span><span class="label">Reading the page</span><span class="detail"></span></li>
+        <li data-step="media"><span class="dot"></span><span class="label">Collecting pictures</span><span class="detail"></span></li>
+        <li data-step="write"><span class="dot"></span><span class="label">Writing the script</span><span class="detail"></span></li>
+        <li data-step="build"><span class="dot"></span><span class="label">Building the timeline</span><span class="detail"></span></li>
+      </ol>
+    </section>
+
+    <section id="result" class="result" hidden>
+      <div class="stageCol">
+        <div class="stageWrap">
+          <div id="stage" class="stage">
+            <img id="poster" alt="Preview frame of the video">
+            <div id="playerHost"></div>
+            <button id="bigPlay" class="bigPlay" type="button" aria-label="Play preview" hidden></button>
+          </div>
+        </div>
+        <div class="transport">
+          <button id="playBtn" type="button" class="ghost" disabled>Play</button>
+          <div class="scrub" id="scrub" aria-hidden="true"><div id="scrubFill"></div></div>
+          <span id="clock" class="clock">0:00</span>
+        </div>
+        <p id="previewNote" class="hint"></p>
+
+        <div class="deliver">
+          <button id="renderBtn" type="button" class="primary">Render MP4</button>
+          <a id="download" class="ghost" hidden download>Download MP4</a>
+          <button id="again" type="button" class="ghost">New link</button>
+        </div>
+        <p id="renderStatus" class="hint" aria-live="polite"></p>
+        <video id="final" controls playsinline hidden></video>
+      </div>
+
+      <div class="boardCol">
+        <div class="boardHead">
+          <div>
+            <h2 id="videoTitle">Your video</h2>
+            <p id="videoMeta" class="hint"></p>
+          </div>
+          <button id="apply" type="button" class="primary" disabled>Apply changes</button>
+        </div>
+        <ul id="notices" class="notices"></ul>
+
+        <div class="field brandField">
+          <label for="brandName">Brand name</label>
+          <input id="brandName" type="text" maxlength="40">
+        </div>
+        <div class="swatches" id="swatches" aria-label="Colours"></div>
+
+        <ol id="scenes" class="scenes"></ol>
+        <p id="musicCredit" class="hint"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Previews are free. Rendering an MP4 uses the site's Vidmoat export allowance.</p>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
