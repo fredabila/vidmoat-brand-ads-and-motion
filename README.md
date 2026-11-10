@@ -36,7 +36,9 @@ talks to this app's own `/api`.
 | Vidmoat **live** key | Real MP4 renders, billed to your export allowance. Needs Studio, Team or Enterprise and an approved app. |
 | No Anthropic key | Still works: the script is assembled from the page's headings instead of written. |
 
-Deploy it anywhere that runs a long-lived Node 20+ process (Render, Railway, Fly, a VPS).
+Deploy it anywhere that runs Node 20+ (Render, Railway, Fly, a VPS), or on Vercel: `api/index.js`
+and `vercel.json` run the same app as one function, with `VIDMOAT_KEY`, `ANTHROPIC_API_KEY` and
+`APP_SECRET` set as project environment variables.
 The app keeps no database: every video is a project on your Vidmoat account.
 
 ## How a video is made
