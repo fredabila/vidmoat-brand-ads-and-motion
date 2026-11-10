@@ -102,12 +102,19 @@ export function checkDesign(design) {
   if (!html.includes('class="sc-')) return no('classes are not in the sc- namespace');
   // The design has to be driven by the timeline, or it is a still.
   if (!/--vm-[tp]/.test(html + css)) return no('nothing moves on the timeline clock');
-  return { design: { html, css }, reason: null };
+  // The frame background: one declaration value, nothing that could close the rule or fetch.
+  const bg = typeof design.background === 'string' ? design.background.trim() : '';
+  const background = bg && bg.length <= 800 && !/[;{}]/.test(bg) && !BAD_VALUE.test(bg) ? bg : '';
+  const m = design.mediaBox;
+  const box = m && [m.x, m.y, m.width, m.height].every(Number.isFinite) && m.width >= 120 && m.height >= 120 && m.x >= 0 && m.y >= 0 && m.x + m.width <= 4000 && m.y + m.height <= 4000
+    ? { x: Math.round(m.x), y: Math.round(m.y), width: Math.round(m.width), height: Math.round(m.height) } : null;
+  return { design: { html, css, background, mediaBox: box }, reason: null };
 }
 
 /** Move a sanitised design into a clip's own namespace. */
 export function scopeDesign(design, prefix) {
   return {
+    ...design,
     html: design.html.replace(/\bsc-/g, prefix),
     css: design.css.replace(/\.sc-/g, `.${prefix}`),
   };
@@ -118,6 +125,9 @@ export function scopeDesign(design, prefix) {
 const DesignSchema = z.object({
   html: z.string().describe('Body markup for the scene. One root element.'),
   css: z.string().describe('The stylesheet. Class selectors only.'),
+  background: z.string().describe('Only when you own the whole frame: one CSS background value for the frame (a colour, or gradients, built from the palette variables). Empty string otherwise.'),
+  mediaBox: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .describe('Only when you own the whole frame and the scene has a picture: where it goes, in pixels from the top-left. All zeros otherwise.'),
 });
 
 const SYSTEM = `You are a motion designer. You are given one scene of a short ad and you design it from scratch as an HTML and CSS motion graphic. Nobody will edit your output: it is rendered to video exactly as written, so it has to be right on its own.
@@ -136,7 +146,7 @@ Rules the gate enforces (a design that breaks one is thrown away and replaced by
 - No url(), no external anything, no position:fixed.
 
 Design rules:
-- One root element with class sc-root, position:absolute, covering the canvas (left:0;top:0;width:100%;height:100%), transparent. A themed background is already drawn behind you, and a brand bar is drawn on top in the top band, so keep everything inside the safe box you are given.
+{{FRAME}}
 - Use the palette only through these variables, so the scene can be recoloured: var(--bg), var(--surface), var(--accent), var(--text), and var(--on-accent) for anything sitting on the accent colour.
 - Anything sitting on var(--accent) is coloured var(--on-accent). Never set var(--accent) against var(--text), in either direction: on some scenes they are close.
 - Use exactly the two font-family values you are given, written out literally.
@@ -144,6 +154,40 @@ Design rules:
 - Viewers have the sound off and about four seconds. One idea, a clear hierarchy, and a reveal with an order to it: the thing that matters most lands last or biggest.
 - Use only the words and facts in the scene you are given. Do not add claims, numbers, names or prices.
 - This is where the video stops looking like a template, so do not make a centred headline with a line under it. Build the thing the brief describes: a comparison, steps, a mock screen, a chart, a price tag, a chat, a rating, a timeline, type as image.`;
+
+const FRAME_SHARED = `- One root element with class sc-root, position:absolute, covering the canvas (left:0;top:0;width:100%;height:100%), transparent. A themed background is already drawn behind you, and a brand bar is drawn on top in the top band, so keep everything inside the safe box you are given. Return an empty background and a zero mediaBox.`;
+
+const FRAME_OWNED = `- One root element with class sc-root, position:absolute, covering the canvas (left:0;top:0;width:100%;height:100%), transparent. You own the whole frame: nothing is drawn that you did not ask for. There is no template, no brand bar, no stock background.
+- Return the frame's background in "background": one CSS background value built from the palette variables (a flat colour, layered gradients, a pattern made of gradients). It is painted behind your layer and behind any picture. Moving background shapes belong in your markup, not there.
+- If the scene has a picture, it is placed for you behind your layer, cropped to fill the box you return in mediaBox. Leave that box clear, or frame it, label it, overlap its edge with type: design around it. If you would rather not show the picture, return zeros. If the scene has footage, it fills the whole frame behind you: put your own scrim under the words.
+- You are one of several designers drawing scenes of the same film at the same moment. Follow the film's design system exactly (its fonts, its motif, its way of moving) so the scenes belong together, and give your scene a composition its neighbours do not have.
+- If the brand name should appear, you place it. Keep all text inside the safe box.`;
+
+const system = (owned) => SYSTEM.replace('{{FRAME}}', owned ? FRAME_OWNED : FRAME_SHARED);
+
+function ownedPrompt({ scene, canvas, safe, palette, direction, brand, index, count, neighbours, media }) {
+  return `Canvas: ${canvas.width} x ${canvas.height} pixels. Safe box for text: left ${safe.x}, top ${safe.y}, width ${safe.width}, height ${safe.height}.
+
+The film's design system (set by the art director, the same for every scene):
+- Concept: ${direction.concept}
+- Motif: ${direction.motif}
+- Headline font-family: '${direction.headFont}',sans-serif
+- Body font-family: '${direction.bodyFont}',sans-serif
+- Palette (use the variables; these values are for judging contrast): --bg ${palette.background}, --surface ${palette.surface}, --accent ${palette.accent}, --text ${palette.text}
+- Scene changes: ${direction.transition === 'cut' ? 'hard cuts, so your first move may start at 0.1 seconds' : `a ${direction.transition} wipe covers the frame for the first 0.45 seconds`}
+- Brand: ${brand}
+
+Your scene is number ${index + 1} of ${count} (${scene.kind}).
+- What to build: ${scene.brief || scene.headline}
+- Headline: ${scene.headline}
+- Supporting line: ${scene.sub || '(none)'}
+- Points: ${(scene.items ?? []).join(' | ') || '(none)'}
+${scene.kind === 'stat' ? `- The number: ${scene.statPrefix}${scene.statValue}${scene.statSuffix}\n` : ''}${scene.kind === 'cta' ? `- Button label: ${scene.cta}\n` : ''}- The narrator says over it: ${scene.voice || '(nothing)'}
+- Picture: ${media ?? 'none'}
+
+For continuity, the scene before yours: ${neighbours.before ?? '(yours is first)'}
+The scene after yours: ${neighbours.after ?? '(yours is last)'}`;
+}
 
 function userPrompt({ scene, canvas, safe, palette, look, brand }) {
   return `Canvas: ${canvas.width} x ${canvas.height} pixels.
@@ -168,7 +212,11 @@ The scene:
  */
 export async function designScene(client, ctx, { model, log = () => {} } = {}) {
   try {
-    const messages = [{ role: 'user', content: userPrompt(ctx) }];
+    const owned = Boolean(ctx.direction);
+    const content = [{ type: 'text', text: owned ? ownedPrompt(ctx) : userPrompt(ctx) }];
+    // In an owned frame the designer sees the picture it is composing around.
+    if (owned && ctx.picture) content.push({ type: 'image', source: { type: 'url', url: ctx.picture } });
+    const messages = [{ role: 'user', content }];
     let checked = { design: null, reason: 'no attempt' };
     // One correction round: if the gate refuses the design, Claude is told exactly why and fixes it.
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -178,7 +226,7 @@ export async function designScene(client, ctx, { model, log = () => {} } = {}) {
         thinking: { type: 'adaptive' },
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
-        system: SYSTEM,
+        system: system(owned),
         messages,
         output_config: { effort: 'medium', format: betaZodOutputFormat(DesignSchema) },
       });
@@ -193,6 +241,8 @@ export async function designScene(client, ctx, { model, log = () => {} } = {}) {
     return checked;
   } catch (err) {
     log(err instanceof Anthropic.APIError ? `custom scene: ${err.message}` : err);
-    return { design: null, reason: err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}`.trim() : 'unexpected error' };
+    // A picture the API cannot read must not cost the scene its design: try once more without it.
+    if (err instanceof Anthropic.BadRequestError && ctx.picture) return designScene(client, { ...ctx, picture: null }, { model, log });
+    return { design: null, reason: err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}: ${String(err.message).slice(0, 160)}`.trim() : 'unexpected error' };
   }
 }

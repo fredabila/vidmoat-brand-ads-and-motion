@@ -38,7 +38,22 @@ const SceneSchema = z.object({
   cta: z.string().describe('cta scenes only: the button label, 1 to 3 words. Empty otherwise.'),
 });
 
+/** Fonts the renderer can embed. The art director chooses from these. */
+export const HEAD_FONTS = ['Inter', 'Anton', 'Archivo Black', 'Bebas Neue', 'Playfair Display', 'Space Grotesk', 'Titan One', 'Abril Fatface',
+  'Alfa Slab One', 'Bungee', 'Righteous', 'Fjalla One', 'Staatliches', 'Passion One', 'Russo One', 'Bangers'];
+export const BODY_FONTS = ['Inter', 'Space Grotesk', 'Space Mono', 'Playfair Display'];
+export const TRANSITIONS = ['slab', 'curtain', 'iris', 'blinds', 'cut'];
+
+const DirectionSchema = z.object({
+  concept: z.string().describe('The visual idea of the whole film in two or three sentences: what it looks like, what it feels like, what makes it this brand and no other.'),
+  motif: z.string().describe('The recurring device every scene shares, in one or two sentences: a shape, a layout habit, a way type enters, how pictures are framed.'),
+  headFont: z.enum(HEAD_FONTS),
+  bodyFont: z.enum(BODY_FONTS),
+  transition: z.enum(TRANSITIONS).describe('How scenes change: slab (skewed panels), curtain (straight panels), iris (a circle closes and opens), blinds (bands), or cut (hard cuts).'),
+});
+
 export const StoryboardSchema = z.object({
+  direction: DirectionSchema,
   brandName: z.string().describe('The brand or product name as the page writes it.'),
   tagline: z.string().describe('One line that sums up the promise, at most 8 words.'),
   palette: z.object({
@@ -83,7 +98,7 @@ export function buildUserPrompt(brief, { goal, sceneCount, format, freedom = 'fr
   return `Write the storyboard for ${GOALS[goal] ?? GOALS.ad}.
 
 Exactly ${sceneCount} scenes: the first is a hook, the last is a cta. Canvas: ${format}.
-${freedom === 'free' ? `You have a free hand: make ${sceneCount <= 4 ? 'one' : sceneCount <= 6 ? 'two' : 'three'} of the middle scenes custom, each a different kind of picture, wherever the idea deserves more than a standard frame.` : 'Use no custom scenes.'}
+${freedom === 'full' ? `You are the art director of this film, and there is no template. Every scene is drawn from scratch by a designer who gets your direction and that scene's brief and nothing else, so set direction with care and write a brief for every scene, hook and cta included: what the frame shows, how it is composed, how it moves. Make consecutive scenes different kinds of picture. Use any kind for what the scene is (its kind tells the designer its job); custom is for anything the other kinds do not name.` : freedom === 'free' ? `You have a free hand: make ${sceneCount <= 4 ? 'one' : sceneCount <= 6 ? 'two' : 'three'} of the middle scenes custom, each a different kind of picture, wherever the idea deserves more than a standard frame.` : 'Use no custom scenes.'}
 
 <page>
 URL: ${brief.url}
@@ -182,7 +197,7 @@ export function numberInText(value, text) {
  * `trustNumbers` is for a storyboard a person edited by hand: the rule that a
  * counter may only show a number from the page binds the model, not the owner.
  */
-export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = false, allowCustom = false }) {
+export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = false, allowCustom = false, directed = false }) {
   const pageText = trustNumbers ? '' : briefText(brief);
   const flat = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const flatPage = flat(pageText);
@@ -192,7 +207,8 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
     let kind = ['hook', 'feature', 'stat', 'list', 'quote', 'custom', 'cta'].includes(s?.kind) ? s.kind : 'feature';
     const sceneBrief = String(s?.brief ?? '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
     // A custom scene is its design. Before the design exists it needs a brief; after, it needs to pass the gate.
-    const design = kind === 'custom' ? sanitizeDesign(s?.design) : null;
+    // Any scene may carry a design Claude drew for it; a custom scene must end up with one.
+    const design = sanitizeDesign(s?.design);
     if (kind === 'custom' && !design && (!allowCustom || !sceneBrief)) kind = 'feature';
     const items = (Array.isArray(s?.items) ? s.items : []).map((item) => tidy(item, 6, 40)).filter(Boolean).slice(0, 4);
     if (kind === 'list' && items.length < 2) kind = 'feature';
@@ -208,7 +224,7 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
       kind,
       headline,
       items: keepItems ? items : [],
-      brief: kind === 'custom' ? sceneBrief : '',
+      brief: kind === 'custom' || allowCustom || design ? sceneBrief : '',
       design,
       highlight: highlight && headline.toLowerCase().includes(highlight.toLowerCase()) ? highlight : '',
       sub: tidy(s?.sub, 14, 96),
@@ -238,6 +254,14 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
   return {
     brandName,
     tagline,
+    direction: {
+      concept: String(raw?.direction?.concept ?? '').replace(/[\u0000-\u001f<>]/g, ' ').slice(0, 600),
+      motif: String(raw?.direction?.motif ?? '').replace(/[\u0000-\u001f<>]/g, ' ').slice(0, 400),
+      headFont: HEAD_FONTS.includes(raw?.direction?.headFont) ? raw.direction.headFont : 'Inter',
+      bodyFont: BODY_FONTS.includes(raw?.direction?.bodyFont) ? raw.direction.bodyFont : 'Inter',
+      transition: TRANSITIONS.includes(raw?.direction?.transition) ? raw.direction.transition : 'curtain',
+    },
+    directed: raw?.directed === true || directed,
     palette: fixPalette(raw?.palette),
     musicQuery: tidy(raw?.musicQuery, 4, 40) || 'upbeat background',
     scenes,
@@ -311,7 +335,7 @@ export async function writeStoryboard(brief, { goal = 'ad', length = 'standard',
       log(`Claude returned no storyboard (stop_reason: ${response.stop_reason})`);
       return { storyboard: heuristicStoryboard(brief, { sceneCount }), source: 'fallback', reason: `Claude stopped with ${response.stop_reason}` };
     }
-    return { storyboard: sanitizeStoryboard(response.parsed_output, brief, { sceneCount, allowCustom: freedom === 'free' }), source: 'claude' };
+    return { storyboard: sanitizeStoryboard(response.parsed_output, brief, { sceneCount, allowCustom: freedom !== 'guided', directed: freedom === 'full' }), source: 'claude' };
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
       log(`Claude credentials were refused: ${err.message}`);

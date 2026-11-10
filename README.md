@@ -75,6 +75,14 @@ scene, between a page picture, stock footage from Vidmoat's library (it writes t
 phrase), or type alone. Type-only scenes rotate through four compositions and three
 colour castings of the brand palette, so consecutive scenes never look the same.
 
+**Claude as art director (the default).** With *Claude art-directs* selected there is no
+template. Claude sets the film's design system (a concept, a recurring motif, fonts from
+the engine's catalogue, the palette, how scenes change) and then draws every scene from
+scratch in parallel, each call given that system, its own brief and its neighbours'. A
+scene owns its whole frame: it returns its background, says where the page's picture goes
+and places the brand itself. The six looks below are only used for a scene whose design
+fails the gate twice; the result says which.
+
 **Scenes Claude designs itself.** With *Claude designs scenes* on (the default), Claude
 marks some scenes `custom` and writes a brief for each; a second call per scene has it
 write the scene's HTML and CSS from scratch, animated on the timeline clock: numbered

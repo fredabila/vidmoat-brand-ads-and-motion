@@ -89,3 +89,42 @@ test('a design that fails the gate comes back as null, never an exception', asyn
   assert.equal((await designScene({ beta: { messages: { parse: async () => { throw new Error('boom'); } } } }, ctx)).design, null);
   assert.ok((await designScene(client({ stop_reason: 'end_turn', parsed_output: good }), ctx)).design);
 });
+
+test('with Claude as art director a designed scene owns the frame', () => {
+  const design = sanitizeDesign({ ...good, background: 'linear-gradient(160deg,var(--bg),var(--surface))', mediaBox: { x: 90, y: 900, width: 900, height: 700 } });
+  assert.equal(design.background, 'linear-gradient(160deg,var(--bg),var(--surface))');
+  assert.deepEqual(design.mediaBox, { x: 90, y: 900, width: 900, height: 700 });
+  // A background that tries to close the rule or fetch something is dropped, not trusted.
+  assert.equal(sanitizeDesign({ ...good, background: 'red;} body{display:none' }).background, '');
+  assert.equal(sanitizeDesign({ ...good, background: 'url(https://x.example/a.png)' }).background, '');
+  assert.equal(sanitizeDesign({ ...good, mediaBox: { x: 0, y: 0, width: 0, height: 0 } }).mediaBox, null);
+
+  const blank = { highlight: '', sub: '', items: [], footage: -1, voice: '' };
+  const sb = {
+    brandName: 'T', tagline: 't', musicQuery: 'x', directed: true,
+    direction: { concept: 'c', motif: 'm', headFont: 'Bebas Neue', bodyFont: 'Space Mono', transition: 'cut' },
+    palette: { background: '#101010', surface: '#202020', accent: '#ff5500', text: '#ffffff' },
+    scenes: [
+      { ...blank, kind: 'hook', headline: 'Hi', image: 0, design },
+      { ...blank, kind: 'feature', headline: 'Plain', image: -1 }, // its design failed: the template draws it
+      { ...blank, kind: 'cta', headline: 'Go', image: -1, cta: 'Go', design: sanitizeDesign(good) },
+    ],
+  };
+  const { commands } = compose({ storyboard: sb, images: [{ src: 'https://api.vidmoat.com/uploads/a.jpg', width: 1200, height: 800 }], canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks: { back: 4, media: 5, front: 6 } });
+  const get = (id) => commands.find((c) => c.clipId === id);
+  assert.match(get('s0_back').html, /background:linear-gradient\(160deg,var\(--bg\),var\(--surface\)\)/);
+  assert.match(get('s2_back').html, /background:var\(--bg\)/); // no background given: the brand colour
+  // The picture sits in the box the designer asked for (centre of 90..990 x 900..1600 on a 1080 x 1920 canvas).
+  assert.equal(get('s0_img').patch.x, 0);
+  assert.ok(Math.abs(get('s0_img').patch.y - 290) <= 2);
+  const front = get('s0_front');
+  assert.ok(!front.html.includes('f-sgs') && !front.html.includes('f-wp'), 'no brand bar and, with hard cuts, no wipe panels');
+  assert.match(front.css, /font-family:'Bebas Neue'/);
+  assert.match(front.css, /font-family:'Space Mono'/);
+  // The scene without a design still gets the template: its own background and brand bar.
+  assert.match(get('s1_front').html, /s1f-sgs/);
+  for (const c of commands.filter((x) => x.op === 'addHtmlElement')) {
+    const prefix = c.clipId.replace('_back', 'b-').replace('_front', 'f-');
+    for (const rule of c.css.split('}').map((r) => r.trim()).filter(Boolean)) assert.ok(rule.startsWith(`.${prefix}`), rule.slice(0, 50));
+  }
+});
