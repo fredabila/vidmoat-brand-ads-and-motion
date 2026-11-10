@@ -220,6 +220,7 @@ legend span { color: var(--hot); margin-right: 6px; }
 .sceneJump small { display: block; font: 500 9.5px/1 var(--mono); color: #b9b19f; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 5px; }
 .sceneJump:hover { background: var(--hot); }
 .sceneFields { display: grid; gap: 10px; }
+.designed { margin: 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.45; }
 .sceneRow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ---------- How it works ---------- */

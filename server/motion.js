@@ -45,26 +45,32 @@ export const backOut = (x) => `(1 + 2.70158 * pow(${x} - 1,3) + 1.70158 * pow(${
 
 export const LOOKS = {
   punch: {
+    mood: 'Loud and fast. Condensed capitals, solid blocks of the accent colour, hard edges, things slam and snap into place.',
     headFont: 'Anton', headWeight: 400, uppercase: true, charWidth: 0.4, lineHeight: 1.02, tracking: '0.005em', sizeBoost: 1.22,
     reveal: 'rise', stagger: 0.055, revealTime: 0.5, highlight: 'block', wipe: 'slab', radius: 10,
   },
   sleek: {
+    mood: 'Premium and calm. Tight sans type, soft light, thin lines, glassy rounded cards, smooth unhurried reveals.',
     headFont: 'Inter', headWeight: 800, uppercase: false, charWidth: 0.55, lineHeight: 1.04, tracking: '-0.035em', sizeBoost: 1,
     reveal: 'soft', stagger: 0.075, revealTime: 0.75, highlight: 'underline', wipe: 'curtain', radius: 36,
   },
   playful: {
+    mood: 'Warm and bouncy. Round type, pills, stickers set at a slight angle, overshoot on everything.',
     headFont: 'Titan One', headWeight: 400, uppercase: false, charWidth: 0.6, lineHeight: 1.08, tracking: '0', sizeBoost: 0.92,
     reveal: 'pop', stagger: 0.07, revealTime: 0.6, highlight: 'pill', wipe: 'iris', radius: 48,
   },
   editorial: {
+    mood: 'A magazine page. Serif headlines, italics for emphasis, hairline rules, generous space, slow elegant reveals.',
     headFont: 'Playfair Display', headWeight: 700, uppercase: false, charWidth: 0.5, lineHeight: 1.06, tracking: '-0.02em', sizeBoost: 1.02,
     reveal: 'soft', stagger: 0.09, revealTime: 0.9, highlight: 'italic', wipe: 'curtain', radius: 4,
   },
   neon: {
+    mood: 'Tech at night. Glowing accent on dark, fine lines, monospaced detail, crisp quick reveals.',
     headFont: 'Space Grotesk', headWeight: 700, uppercase: false, charWidth: 0.56, lineHeight: 1.02, tracking: '-0.045em', sizeBoost: 1.02,
     reveal: 'rise', stagger: 0.05, revealTime: 0.55, highlight: 'glow', wipe: 'blinds', radius: 22,
   },
   brutal: {
+    mood: 'Brutalist poster. Heavy capitals, thick borders, hard offset shadows, flat colour, no rounding.',
     headFont: 'Archivo Black', headWeight: 400, uppercase: true, charWidth: 0.63, lineHeight: 1, tracking: '-0.02em', sizeBoost: 0.96,
     reveal: 'pop', stagger: 0.06, revealTime: 0.45, highlight: 'box', wipe: 'blinds', radius: 0,
   },
@@ -407,6 +413,13 @@ export function frontLayer(p, ctx) {
       (scene.sub ? `<div class="${p}sb" style="font-size:${layout.subSize}px;margin-top:${Math.round(layout.subSize * 0.6)}px;${subStyle(at + 1.3)}">${esc(scene.sub)}</div>` : '') +
       '</div>';
     css += odo.css + `\n.${p}rule{height:8px;width:${Math.round(r.width * 0.42)}px;background:${palette.text};transform-origin:0 50%;margin-top:${Math.round(layout.subSize * 0.5)}px;border-radius:4px}`;
+  } else if (scene.kind === 'custom' && ctx.design) {
+    // A scene Claude designed itself. It arrives sanitised and namespaced (freeform.js);
+    // the palette reaches it as variables so the colour casting still applies.
+    const vars = `--bg:${palette.background};--surface:${palette.surface};--accent:${palette.accent};--text:${palette.text};--on-accent:${inkOn(palette.accent)}`;
+    body += `<div class="${p}cu" style="${vars}">${ctx.design.html}</div>`;
+    // Naming both families here is what gets them embedded for the design to use.
+    css += `\n.${p}cu{position:absolute;left:0;top:0;width:100%;height:100%;color:${palette.text};font-family:'Inter',sans-serif}\n.${p}cuh{font-family:'${look.headFont}',sans-serif}\n${ctx.design.css}`;
   } else if (scene.kind === 'list') {
     // A short headline, then the points tick in one by one.
     const r = layout.solo;

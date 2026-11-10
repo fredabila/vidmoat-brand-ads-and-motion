@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { briefText } from './scrape.js';
+import { sanitizeDesign } from './freeform.js';
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
@@ -22,8 +23,9 @@ export const GOALS = {
 };
 
 const SceneSchema = z.object({
-  kind: z.enum(['hook', 'feature', 'stat', 'list', 'quote', 'cta']),
+  kind: z.enum(['hook', 'feature', 'stat', 'list', 'quote', 'custom', 'cta']),
   headline: z.string().describe('The words on screen. 2 to 6 words, no trailing full stop.'),
+  brief: z.string().describe('custom scenes only: what the scene shows and how it moves, in two or three sentences a motion designer could build from. Empty otherwise.'),
   items: z.array(z.string()).describe('list scenes only: 2 to 4 short points, each at most 5 words. Empty array otherwise.'),
   highlight: z.string().describe('One word or short phrase copied exactly from the headline to colour as the emphasis. Empty string for none.'),
   sub: z.string().describe('A supporting line, at most 12 words. Empty string for none.'),
@@ -59,6 +61,7 @@ Scene kinds:
 - stat: one real number from the page, animated as a counter. The headline is the label for the number.
 - list: a short headline and 2 to 4 points that tick in one by one. Use it when the page lists several benefits, features or what is included.
 - quote: a customer's or reviewer's words, copied exactly from the page, with who said it in sub. Only when the page really has one; never write one yourself. The headline is the quote (it may be up to 22 words).
+- custom: a scene designed from scratch for this one idea, by a motion designer who gets your brief and nothing else. Use it where a standard frame would undersell the idea: a before and after, numbered steps, a mock of the product's screen, a chat exchange, a simple chart, a price tag, a star rating, a timeline, one word used as a picture. Put the words it must show in headline, sub and items, and describe the picture and its motion in brief.
 - cta: the close. The headline is the last thing the viewer should remember; cta is the button label. Always the last scene.
 
 Rules that matter, and why:
@@ -72,7 +75,7 @@ Rules that matter, and why:
 - The narration follows the same rule as the screen: only what the page says. Write it to be spoken: short, plain, no symbols, numbers as a person would say them.
 - Write in the language of the page.`;
 
-export function buildUserPrompt(brief, { goal, sceneCount, format }) {
+export function buildUserPrompt(brief, { goal, sceneCount, format, freedom = 'free' }) {
   const list = (items) => items.map((t) => `- ${t}`).join('\n') || '(none)';
   const images = brief.images.map((img, i) =>
     `${i}: ${img.hint ? `[${img.hint}] ` : ''}${img.alt || '(no description)'}${img.width ? ` (${img.width}x${img.height})` : ''}`,
@@ -80,6 +83,7 @@ export function buildUserPrompt(brief, { goal, sceneCount, format }) {
   return `Write the storyboard for ${GOALS[goal] ?? GOALS.ad}.
 
 Exactly ${sceneCount} scenes: the first is a hook, the last is a cta. Canvas: ${format}.
+${freedom === 'free' ? `You have a free hand: make ${sceneCount <= 4 ? 'one' : sceneCount <= 6 ? 'two' : 'three'} of the middle scenes custom, each a different kind of picture, wherever the idea deserves more than a standard frame.` : 'Use no custom scenes.'}
 
 <page>
 URL: ${brief.url}
@@ -178,16 +182,21 @@ export function numberInText(value, text) {
  * `trustNumbers` is for a storyboard a person edited by hand: the rule that a
  * counter may only show a number from the page binds the model, not the owner.
  */
-export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = false }) {
+export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = false, allowCustom = false }) {
   const pageText = trustNumbers ? '' : briefText(brief);
   const flat = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const flatPage = flat(pageText);
   const usable = (i) => Number.isInteger(i) && i >= 0 && i < brief.images.length;
 
   let scenes = (Array.isArray(raw?.scenes) ? raw.scenes : []).map((s) => {
-    let kind = ['hook', 'feature', 'stat', 'list', 'quote', 'cta'].includes(s?.kind) ? s.kind : 'feature';
+    let kind = ['hook', 'feature', 'stat', 'list', 'quote', 'custom', 'cta'].includes(s?.kind) ? s.kind : 'feature';
+    const sceneBrief = String(s?.brief ?? '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
+    // A custom scene is its design. Before the design exists it needs a brief; after, it needs to pass the gate.
+    const design = kind === 'custom' ? sanitizeDesign(s?.design) : null;
+    if (kind === 'custom' && !design && (!allowCustom || !sceneBrief)) kind = 'feature';
     const items = (Array.isArray(s?.items) ? s.items : []).map((item) => tidy(item, 6, 40)).filter(Boolean).slice(0, 4);
     if (kind === 'list' && items.length < 2) kind = 'feature';
+    const keepItems = kind === 'list' || kind === 'custom';
     // A testimonial must be somebody's real words: it has to appear on the page.
     if (kind === 'quote' && !trustNumbers && !(flat(s?.headline).length > 12 && flatPage.includes(flat(s?.headline)))) kind = 'feature';
     const headline = kind === 'quote' ? tidy(s?.headline, 24, 170) : tidy(s?.headline, 8, 64);
@@ -198,7 +207,9 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
     return {
       kind,
       headline,
-      items: kind === 'list' ? items : [],
+      items: keepItems ? items : [],
+      brief: kind === 'custom' ? sceneBrief : '',
+      design,
       highlight: highlight && headline.toLowerCase().includes(highlight.toLowerCase()) ? highlight : '',
       sub: tidy(s?.sub, 14, 96),
       image: usable(s?.image) ? s.image : -1,
@@ -218,9 +229,9 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
   // Shape: one hook first, one cta last, the right number in between.
   const middle = scenes.filter((s) => s.kind !== 'hook' && s.kind !== 'cta').slice(0, Math.max(sceneCount - 2, 0));
   const hook = scenes.find((s) => s.kind === 'hook') ??
-    { kind: 'hook', headline: tagline || brandName, items: [], highlight: '', sub: '', voice: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
+    { kind: 'hook', headline: tagline || brandName, items: [], brief: '', design: null, highlight: '', sub: '', voice: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
   const cta = scenes.find((s) => s.kind === 'cta') ??
-    { kind: 'cta', headline: tagline || brandName, items: [], highlight: '', sub: '', voice: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
+    { kind: 'cta', headline: tagline || brandName, items: [], brief: '', design: null, highlight: '', sub: '', voice: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
   if (!cta.cta) cta.cta = 'Learn more';
   scenes = [hook, ...middle, cta];
 
@@ -268,7 +279,7 @@ export function claudeConfigured(env = process.env) {
  * A refusal or an unparseable answer falls back to the page's own words rather
  * than failing the whole video.
  */
-export async function writeStoryboard(brief, { goal = 'ad', length = 'standard', format = '9:16', client, model, log = () => {} } = {}) {
+export async function writeStoryboard(brief, { goal = 'ad', length = 'standard', format = '9:16', freedom = 'free', client, model, log = () => {} } = {}) {
   const sceneCount = (LENGTHS[length] ?? LENGTHS.standard).scenes;
   if (!client && !claudeConfigured()) {
     return { storyboard: heuristicStoryboard(brief, { sceneCount }), source: 'fallback', reason: 'ANTHROPIC_API_KEY is not set' };
@@ -283,7 +294,7 @@ export async function writeStoryboard(brief, { goal = 'ad', length = 'standard',
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
     system: SYSTEM,
-    messages: [{ role: 'user', content: buildUserContent(brief, { goal, sceneCount, format }, { withImages }) }],
+    messages: [{ role: 'user', content: buildUserContent(brief, { goal, sceneCount, format, freedom }, { withImages }) }],
     output_config: { effort: 'medium', format: betaZodOutputFormat(StoryboardSchema) },
   });
   try {
@@ -300,7 +311,7 @@ export async function writeStoryboard(brief, { goal = 'ad', length = 'standard',
       log(`Claude returned no storyboard (stop_reason: ${response.stop_reason})`);
       return { storyboard: heuristicStoryboard(brief, { sceneCount }), source: 'fallback', reason: `Claude stopped with ${response.stop_reason}` };
     }
-    return { storyboard: sanitizeStoryboard(response.parsed_output, brief, { sceneCount }), source: 'claude' };
+    return { storyboard: sanitizeStoryboard(response.parsed_output, brief, { sceneCount, allowCustom: freedom === 'free' }), source: 'claude' };
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
       log(`Claude credentials were refused: ${err.message}`);

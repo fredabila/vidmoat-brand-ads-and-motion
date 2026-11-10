@@ -15,6 +15,7 @@
 // - Draw order is the order of the tracks array; two clips cannot overlap on one track.
 
 import { LOOKS, backLayer, frontLayer, inkOn, luminance } from './motion.js';
+import { scopeDesign } from './freeform.js';
 
 export { highlightSpan, estimateText } from './motion.js';
 
@@ -46,7 +47,7 @@ export function mix(a, b, t) {
 
 /** Long enough to read: a base per kind, plus time for every word past six. */
 export function sceneDuration(scene) {
-  const base = { hook: 2.9, feature: 3.4, stat: 3.6, list: 3.4, quote: 3.6, cta: 4.4 }[scene.kind] ?? 3.2;
+  const base = { hook: 2.9, feature: 3.4, stat: 3.6, list: 3.4, quote: 3.6, custom: 4.4, cta: 4.4 }[scene.kind] ?? 3.2;
   const wordCount = `${scene.headline} ${scene.sub} ${(scene.items ?? []).join(' ')}`.split(/\s+/).filter(Boolean).length;
   return round(Math.min(base + Math.max(wordCount - 6, 0) * 0.16, 6.4));
 }
@@ -193,8 +194,12 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
     let themeName = 'base';
     if (!showImage && !clip && scene.kind !== 'hook' && scene.kind !== 'cta') {
       // Not the colour of the scene before, and not the colour the last type-only scene used.
-      const ok = (name) => name !== lastTheme && !(scene.kind === 'stat' && name === 'base' && ROTATION.length > 2);
-      themeName = ROTATION.find((name) => ok(name) && name !== lastSolo) ?? ROTATION.find(ok) ?? 'base';
+      // A scene Claude designed assumes accent, text and background are three different colours.
+      // The accent casting makes two of them the same, so designed scenes never get it.
+      const distinct = contrastRatio(palette.accent, palette.text) >= 2.2;
+      const allowed = (name) => scene.kind !== 'custom' || name === 'base' || (name === 'invert' && distinct);
+      const ok = (name) => allowed(name) && name !== lastTheme && !(scene.kind === 'stat' && name === 'base' && ROTATION.length > 2);
+      themeName = ROTATION.find((name) => ok(name) && name !== lastSolo) ?? ROTATION.find(ok) ?? (scene.kind === 'custom' ? 'base' : ROTATION.find((name) => name !== lastTheme) ?? 'base');
       lastSolo = themeName;
     }
     lastTheme = themeName;
@@ -282,6 +287,7 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
     const front = frontLayer(`${id}f-`, {
       ...shared, scene, layout: ctaLayout, count, duration: d, domain, hasImage: showImage, overMedia: Boolean(clip), textRegion, textAlign,
       soloVariant: soloIndex,
+      design: scene.kind === 'custom' && scene.design ? scopeDesign(scene.design, `${id}f-`) : null,
     });
     if (!showImage && !clip && scene.kind === 'feature') soloIndex += 1;
     push({ op: 'addHtmlElement', clipId: `${id}_front`, name: `Scene ${i + 1} type`, html: front.html, css: front.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.front });
