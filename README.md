@@ -75,10 +75,21 @@ scene, between a page picture, stock footage from Vidmoat's library (it writes t
 phrase), or type alone. Type-only scenes rotate through four compositions and three
 colour castings of the brand palette, so consecutive scenes never look the same.
 
+**Scenes Claude designs itself.** With *Claude designs scenes* on (the default), Claude
+marks some scenes `custom` and writes a brief for each; a second call per scene has it
+write the scene's HTML and CSS from scratch, animated on the timeline clock: numbered
+steps, a chat mock, a before and after, whatever the idea needs. `server/freeform.js` is
+the gate in between: the markup is rebuilt from an allowlist of elements and attributes,
+every class is forced into a per-clip namespace, and anything that loads, runs or uses
+the wall clock is refused. A design that fails the gate falls back to a standard scene,
+and the result says so. Each designed scene adds a Claude call, so these videos take
+longer to make (about two minutes for eight scenes).
+
 Six art directions (`LOOKS` in `server/motion.js`): **Punch**, **Sleek**, **Playful**,
 **Editorial** (serif headlines, hairlines, italics), **Neon** (glowing type, scanlines) and
 **Brutal** (heavy caps, hard frames, hazard bands). Four canvases: 9:16, 4:5, 1:1 and 16:9.
-Six scene formats: hook, feature, counter, checklist, customer quote and closing card. A
+Seven scene formats: hook, feature, counter, checklist, customer quote, closing card, and
+scenes Claude designs from scratch. A
 quote is only used when its words appear on the page.
 
 ## Things to know before you put it in front of people

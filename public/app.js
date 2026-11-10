@@ -5,7 +5,7 @@ const PLAYER_ORIGIN = 'https://www.vidmoat.com';
 const PLAYER_CHANNEL = 'vidmoat.player.v1';
 const ASPECT_ICON = { vertical: [9, 16], portrait: [11, 14], square: [13, 13], wide: [18, 10] };
 const GOAL_LABEL = { ad: 'Ad', brand: 'Brand film', launch: 'Launch' };
-const KIND_LABEL = { hook: 'Hook', feature: 'Point', stat: 'Number', list: 'List', quote: 'Quote', cta: 'Close' };
+const KIND_LABEL = { custom: 'Designed', hook: 'Hook', feature: 'Point', stat: 'Number', list: 'List', quote: 'Quote', cta: 'Close' };
 const SWATCHES = [['background', 'Background'], ['surface', 'Second tone'], ['accent', 'Accent'], ['text', 'Text']];
 
 const state = { video: null, player: null, revision: 0, playing: false, dirty: false, busy: false, renderTimer: null };
@@ -59,6 +59,10 @@ async function loadConfig() {
   options($('styles'), 'style', config.styles, store.get('style') ?? 'sleek', styleCard);
   options($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes`, small: l.label })), store.get('length') ?? 'standard', segment);
   options($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad', segment);
+  options($('freedoms'), 'freedom', [
+    { id: 'free', label: 'Claude designs scenes', small: 'original scenes built for this page' },
+    { id: 'guided', label: 'Templates only', small: 'faster, more predictable' },
+  ], store.get('freedom') ?? 'free', segment);
   $('voice').replaceChildren(...(config.voices ?? []).map((v) => Object.assign(document.createElement('option'), { value: v.id, textContent: v.label })));
   if (store.get('voice')) $('voice').value = store.get('voice');
   $('voiceover').checked = store.get('voiceover') !== 'off';
@@ -111,7 +115,7 @@ async function make(event) {
   const url = $('url').value.trim();
   if (!url) { showFormError('Paste a link first.'); $('url').focus(); return; }
   showFormError(null);
-  for (const name of ['format', 'style', 'length', 'goal']) store.set(name, picked(name));
+  for (const name of ['format', 'style', 'length', 'goal', 'freedom']) store.set(name, picked(name));
   store.set('access', $('access').value);
   store.set('voice', $('voice').value);
   store.set('voiceover', $('voiceover').checked ? 'on' : 'off');
@@ -130,7 +134,7 @@ async function make(event) {
     const res = await fetch('/api/videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Access-Code': $('access').value },
-      body: JSON.stringify({ url, format: picked('format'), style: picked('style'), length: picked('length'), goal: picked('goal'), music: $('music').checked, voiceover: $('voiceover').checked, voice: $('voice').value }),
+      body: JSON.stringify({ url, format: picked('format'), style: picked('style'), length: picked('length'), goal: picked('goal'), music: $('music').checked, voiceover: $('voiceover').checked, voice: $('voice').value, freedom: picked('freedom') }),
     });
     if (!res.ok) {
       failure = (await res.json().catch(() => ({}))).error ?? `The server answered ${res.status}.`;
@@ -243,6 +247,13 @@ function renderBoard(v) {
     fields.append(field({ stat: 'Label for the number', quote: 'Quote' }[scene.kind] ?? 'Headline', scene.headline, (val) => { scene.headline = val; }, { maxLength: scene.kind === 'quote' ? 170 : 64 }));
     if (scene.kind === 'list') {
       fields.append(field('Points (separate with ;)', (scene.items ?? []).join('; '), (val) => { scene.items = val.split(';').map((t) => t.trim()).filter(Boolean); }, { maxLength: 180 }));
+    }
+    if (scene.kind === 'custom') {
+      // Claude drew this scene itself; its words live in the design, so only the narration is editable.
+      fields.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint designed', textContent: `Designed by Claude: ${scene.brief || scene.headline}` }));
+      if (v.assets?.voiceId) fields.append(field('Narration', scene.voice, (val) => { scene.voice = val; }, { maxLength: 220 }));
+      li.append(jump, fields);
+      return li;
     }
     const row = document.createElement('div');
     row.className = 'sceneRow';

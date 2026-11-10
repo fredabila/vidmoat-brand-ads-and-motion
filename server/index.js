@@ -94,7 +94,7 @@ export function createApp({ env = process.env, vidmoat, anthropic, log = console
     const send = (obj) => { if (!res.writableEnded) res.write(`${JSON.stringify(obj)}\n`); };
     try {
       const video = await buildVideo(
-        { url, format: req.body.format, style: req.body.style, length: req.body.length, goal: req.body.goal, music: req.body.music !== false, voiceover: req.body.voiceover !== false, voice: req.body.voice },
+        { url, format: req.body.format, style: req.body.style, length: req.body.length, goal: req.body.goal, music: req.body.music !== false, voiceover: req.body.voiceover !== false, voice: req.body.voice, freedom: req.body.freedom },
         { vidmoat: api, anthropic, emit: (step, status, detail) => send({ type: 'step', step, status, detail }), log },
       );
       send({ type: 'done', video: { ...video, token: signer.sign(video.projectId) } });

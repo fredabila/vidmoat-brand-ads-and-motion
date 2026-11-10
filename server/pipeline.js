@@ -3,6 +3,11 @@
 
 import { imageSize } from 'image-size';
 import { parseBuffer } from 'music-metadata';
+import Anthropic from '@anthropic-ai/sdk';
+import { designScene } from './freeform.js';
+import { LOOKS } from './motion.js';
+import { layoutFor, themeFor } from './compose.js';
+import { claudeConfigured } from './creative.js';
 import { readLink } from './scrape.js';
 import { writeStoryboard, sanitizeStoryboard, LENGTHS } from './creative.js';
 import { compose, setupCommands, sceneDuration, FORMATS, STYLES, TRACK_ORDER } from './compose.js';
@@ -119,6 +124,29 @@ async function attachFootage(vidmoat, storyboard, format, log) {
   return footage;
 }
 
+/**
+ * Have Claude design every custom scene, all at once. A scene whose design does
+ * not come back, or does not pass the gate, becomes an ordinary feature scene.
+ */
+async function designCustomScenes(client, storyboard, { format, style, log }) {
+  const canvas = FORMATS[format];
+  const look = LOOKS[style];
+  const safe = layoutFor(format, canvas).solo;
+  const notes = [];
+  await Promise.all(storyboard.scenes.map(async (scene, i) => {
+    if (scene.kind !== 'custom' || scene.design) return;
+    const out = client
+      ? await designScene(client, { scene, canvas, safe, palette: themeFor(storyboard.palette, 'base'), look, brand: storyboard.brandName }, { log })
+      : { design: null, reason: 'Claude is not connected' };
+    scene.design = out.design;
+    if (!scene.design) {
+      notes.push(`Scene ${i + 1} was meant to be designed by Claude but fell back to a standard scene (${out.reason}).`);
+      scene.kind = 'feature'; scene.brief = ''; scene.items = [];
+    }
+  }));
+  return notes;
+}
+
 function failures(results) {
   return (results ?? []).flatMap((r) => {
     if (r && r.ok === false) return [`${r.op}: ${r.error ?? 'failed'}`];
@@ -182,18 +210,20 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   emit('media', 'done', `${assets.images.length} image${assets.images.length === 1 ? '' : 's'}`);
 
   emit('write', 'active');
+  const freedom = input.freedom === 'guided' ? 'guided' : 'free';
   const { storyboard, source, reason } = await writeStoryboard(brief, {
-    goal: input.goal, length, format: FORMATS[format].label, client: anthropic, log,
+    goal: input.goal, length, format: FORMATS[format].label, freedom, client: anthropic, log,
   });
   emit('write', 'done', source === 'claude' ? `${storyboard.scenes.length} scenes` : 'Written from the page text');
 
   emit('build', 'active');
   const voiceId = VOICES[input.voice] ? input.voice : 'marin';
-  const [created, music, footage, voices] = await Promise.all([
+  const [created, music, footage, voices, designNotes] = await Promise.all([
     vidmoat.createProject(`LinkReel · ${storyboard.brandName} · ${FORMATS[format].aspectRatio}`, setupCommands(format, storyboard.palette.background)),
     input.music === false ? null : findMusic(vidmoat, storyboard.musicQuery, 30).catch((err) => { log(`music: ${err.message}`); return null; }),
     attachFootage(vidmoat, storyboard, format, log),
     input.voiceover === false ? [] : recordVoices(vidmoat, storyboard, voiceId, { fetchImpl, log }),
+    designCustomScenes(anthropic ?? (claudeConfigured() ? new Anthropic() : null), storyboard, { format, style, log }),
   ]);
   assets.footage = footage;
   assets.voices = voices;
@@ -207,7 +237,9 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   const canvas = { width: created.project.settings.width, height: created.project.settings.height };
 
   const composed = compose({ storyboard, images: assets.images, footage, voices, logo: assets.logo, canvas, format, style, tracks, music, domain: brief.domain });
-  const { problems, lint } = await applyAll(vidmoat, projectId, composed.commands);
+  const applied = await applyAll(vidmoat, projectId, composed.commands);
+  const { lint } = applied;
+  const problems = [...designNotes, ...applied.problems];
   const document = await vidmoat.getDocument(projectId);
   emit('build', 'done', `${composed.duration.toFixed(1)}s`);
 
@@ -233,7 +265,7 @@ export async function rebuildVideo(input, { vidmoat, fetchImpl, log = () => {} }
   const music = typeof input.music?.src === 'string' && input.music.src.startsWith(MEDIA_PREFIX) ? input.music : null;
 
   const sceneCount = Math.min(Math.max(input.storyboard?.scenes?.length ?? 0, 2), 10);
-  const storyboard = sanitizeStoryboard(input.storyboard, { images, footage, siteName: 'Brand', title: '', domain: '' }, { sceneCount, trustNumbers: true });
+  const storyboard = sanitizeStoryboard(input.storyboard, { images, footage, siteName: 'Brand', title: '', domain: '' }, { sceneCount, trustNumbers: true, allowCustom: false });
 
   const before = await vidmoat.getDocument(input.projectId);
   const tracks = tracksFromDocument(before);
