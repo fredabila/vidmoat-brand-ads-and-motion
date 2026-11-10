@@ -20,6 +20,7 @@ export { highlightSpan, estimateText } from './motion.js';
 
 export const FORMATS = {
   vertical: { aspectRatio: '9:16', width: 1080, height: 1920, label: 'Vertical 9:16', hint: 'Reels, TikTok, Shorts' },
+  portrait: { aspectRatio: '4:5', width: 1080, height: 1350, label: 'Portrait 4:5', hint: 'Instagram and Facebook feed' },
   square: { aspectRatio: '1:1', width: 1080, height: 1080, label: 'Square 1:1', hint: 'Feed posts' },
   wide: { aspectRatio: '16:9', width: 1920, height: 1080, label: 'Wide 16:9', hint: 'YouTube, websites' },
 };
@@ -28,6 +29,9 @@ export const STYLES = {
   punch: { label: 'Punch', hint: 'Condensed type that slams in, hard wipes. Loud.' },
   sleek: { label: 'Sleek', hint: 'Soft light, tight type, calm reveals. Premium.' },
   playful: { label: 'Playful', hint: 'Round type that pops, pills and stars. Warm.' },
+  editorial: { label: 'Editorial', hint: 'Serif headlines, hairlines, italics. Magazine.' },
+  neon: { label: 'Neon', hint: 'Glowing type, scanlines, light streaks. Tech.' },
+  brutal: { label: 'Brutal', hint: 'Heavy caps, hard frames, hazard bands. Bold.' },
 };
 
 /** Created in this order after the default tracks, so later names draw on top. */
@@ -42,9 +46,9 @@ export function mix(a, b, t) {
 
 /** Long enough to read: a base per kind, plus time for every word past six. */
 export function sceneDuration(scene) {
-  const base = { hook: 2.9, feature: 3.4, stat: 3.6, cta: 4.4 }[scene.kind] ?? 3.2;
-  const wordCount = `${scene.headline} ${scene.sub}`.split(/\s+/).filter(Boolean).length;
-  return round(Math.min(base + Math.max(wordCount - 6, 0) * 0.16, 5.2));
+  const base = { hook: 2.9, feature: 3.4, stat: 3.6, list: 3.4, quote: 3.6, cta: 4.4 }[scene.kind] ?? 3.2;
+  const wordCount = `${scene.headline} ${scene.sub} ${(scene.items ?? []).join(' ')}`.split(/\s+/).filter(Boolean).length;
+  return round(Math.min(base + Math.max(wordCount - 6, 0) * 0.16, 6.4));
 }
 
 /** Where things go on each canvas. Regions are {x, y, width, height} from the top-left. */
@@ -66,34 +70,24 @@ export function layoutFor(formatKey, canvas) {
       ],
     };
   }
-  if (formatKey === 'square') {
-    const m = 72;
-    const w = W - m * 2;
-    return {
-      frame: { margin: m, top: 56, brandSize: 24 }, subSize: 36, buttonSize: 48,
-      heroSize: 150, headSize: 88, soloSize: 128, statSize: 300, ctaSize: 104,
-      hook: { x: m, y: 170, width: w, height: 800 },
-      solo: { x: m, y: 170, width: w, height: 800 },
-      stat: { x: m, y: 170, width: w, height: 800 },
-      cta: { x: m, y: 150, width: w, height: 840 },
-      feature: [
-        { text: { x: m, y: 160, width: w, height: 300 }, image: { x: m, y: 500, width: w, height: 500 }, align: 'end' },
-        { text: { x: m, y: 700, width: w, height: 300 }, image: { x: m, y: 160, width: w, height: 500 }, align: 'start' },
-      ],
-    };
-  }
-  const m = 84;
+  // Every upright or square canvas stacks: words and picture share the height.
+  const tall = H / W;
+  const k = tall >= 1.6 ? 1 : tall >= 1.2 ? 0.9 : 0.82; // type scale for the canvas
+  const m = tall >= 1.6 ? 84 : 72;
   const w = W - m * 2;
+  const top = Math.round(H * (tall >= 1.6 ? 0.13 : 0.135));
+  const bottom = H - Math.round(H * (tall >= 1.6 ? 0.1 : 0.07));
+  const area = { x: m, y: top, width: w, height: bottom - top };
+  const textH = Math.round(area.height * (tall >= 1.2 ? 0.33 : 0.36));
+  const gap = Math.round(H * 0.03);
+  const imageH = area.height - textH - gap;
   return {
-    frame: { margin: m, top: 96, brandSize: 28 }, subSize: 44, buttonSize: 56,
-    heroSize: 184, headSize: 116, soloSize: 164, statSize: 380, ctaSize: 128,
-    hook: { x: m, y: 300, width: w, height: 1330 },
-    solo: { x: m, y: 300, width: w, height: 1330 },
-    stat: { x: m, y: 300, width: w, height: 1330 },
-    cta: { x: m, y: 280, width: w, height: 1400 },
+    frame: { margin: m, top: Math.round(H * 0.05), brandSize: Math.round(28 * k) }, subSize: Math.max(36, Math.round(44 * k)), buttonSize: Math.round(56 * k),
+    heroSize: Math.round(184 * k), headSize: Math.round(116 * k), soloSize: Math.round(164 * k), statSize: Math.round(380 * k), ctaSize: Math.round(128 * k),
+    hook: area, solo: area, stat: area, cta: area,
     feature: [
-      { text: { x: m, y: 250, width: w, height: 520 }, image: { x: m, y: 840, width: w, height: 880 }, align: 'end' },
-      { text: { x: m, y: 1200, width: w, height: 520 }, image: { x: m, y: 250, width: w, height: 880 }, align: 'start' },
+      { text: { x: m, y: top, width: w, height: textH }, image: { x: m, y: top + textH + gap, width: w, height: imageH }, align: 'end' },
+      { text: { x: m, y: top + imageH + gap, width: w, height: textH }, image: { x: m, y: top, width: w, height: imageH }, align: 'start' },
     ],
   };
 }
@@ -170,7 +164,8 @@ export function compose({ storyboard, images = [], footage = [], logo = null, ca
   let soloIndex = 0;
   let lastTheme = 'base';
   let lastSolo = null;
-  const ROTATION = ['invert', 'accent', 'base'];
+  // Neon is a dark look: it alternates the base and accent castings and never goes light.
+  const ROTATION = lookName === 'neon' ? ['accent', 'base'] : ['invert', 'accent', 'base'];
   storyboard.scenes.forEach((scene, i) => {
     const id = `s${i}`;
     const last = i === count - 1;
@@ -190,7 +185,7 @@ export function compose({ storyboard, images = [], footage = [], logo = null, ca
     let themeName = 'base';
     if (!showImage && !clip && scene.kind !== 'hook' && scene.kind !== 'cta') {
       // Not the colour of the scene before, and not the colour the last type-only scene used.
-      const ok = (name) => name !== lastTheme && !(scene.kind === 'stat' && name === 'base');
+      const ok = (name) => name !== lastTheme && !(scene.kind === 'stat' && name === 'base' && ROTATION.length > 2);
       themeName = ROTATION.find((name) => ok(name) && name !== lastSolo) ?? ROTATION.find(ok) ?? 'base';
       lastSolo = themeName;
     }

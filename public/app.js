@@ -3,9 +3,9 @@
 const $ = (id) => document.getElementById(id);
 const PLAYER_ORIGIN = 'https://www.vidmoat.com';
 const PLAYER_CHANNEL = 'vidmoat.player.v1';
-const ASPECT_ICON = { vertical: [9, 16], square: [13, 13], wide: [18, 10] };
+const ASPECT_ICON = { vertical: [9, 16], portrait: [11, 14], square: [13, 13], wide: [18, 10] };
 const GOAL_LABEL = { ad: 'Ad', brand: 'Brand film', launch: 'Launch' };
-const KIND_LABEL = { hook: 'Hook', feature: 'Point', stat: 'Number', cta: 'Close' };
+const KIND_LABEL = { hook: 'Hook', feature: 'Point', stat: 'Number', list: 'List', quote: 'Quote', cta: 'Close' };
 const SWATCHES = [['background', 'Background'], ['surface', 'Second tone'], ['accent', 'Accent'], ['text', 'Text']];
 
 const state = { video: null, player: null, revision: 0, playing: false, dirty: false, busy: false, renderTimer: null };
@@ -21,6 +21,9 @@ const STYLE_DEMO = {
   punch: 'Stop the <i>scroll</i>',
   sleek: 'Made to <i>feel</i> premium',
   playful: 'Say it with <i>joy</i>',
+  editorial: 'The art of <i>less</i>',
+  neon: 'Ship it <i>faster</i>',
+  brutal: 'No <i>fluff</i>',
 };
 
 /** Radio options. `render` returns the visible part of one option. */
@@ -230,7 +233,10 @@ function renderBoard(v) {
     jump.addEventListener('click', () => jumpTo(i));
     const fields = document.createElement('div');
     fields.className = 'sceneFields';
-    fields.append(field(scene.kind === 'stat' ? 'Label for the number' : 'Headline', scene.headline, (val) => { scene.headline = val; }, { maxLength: 64 }));
+    fields.append(field({ stat: 'Label for the number', quote: 'Quote' }[scene.kind] ?? 'Headline', scene.headline, (val) => { scene.headline = val; }, { maxLength: scene.kind === 'quote' ? 170 : 64 }));
+    if (scene.kind === 'list') {
+      fields.append(field('Points (separate with ;)', (scene.items ?? []).join('; '), (val) => { scene.items = val.split(';').map((t) => t.trim()).filter(Boolean); }, { maxLength: 180 }));
+    }
     const row = document.createElement('div');
     row.className = 'sceneRow';
     if (scene.kind === 'stat') {
@@ -245,7 +251,7 @@ function renderBoard(v) {
       );
     } else {
       row.append(
-        field('Supporting line', scene.sub, (val) => { scene.sub = val; }, { maxLength: 96 }),
+        field(scene.kind === 'quote' ? 'Who said it' : 'Supporting line', scene.sub, (val) => { scene.sub = val; }, { maxLength: 96 }),
         field('Coloured words', scene.highlight, (val) => { scene.highlight = val; }, { maxLength: 40 }),
       );
     }

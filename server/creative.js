@@ -22,8 +22,9 @@ export const GOALS = {
 };
 
 const SceneSchema = z.object({
-  kind: z.enum(['hook', 'feature', 'stat', 'cta']),
+  kind: z.enum(['hook', 'feature', 'stat', 'list', 'quote', 'cta']),
   headline: z.string().describe('The words on screen. 2 to 6 words, no trailing full stop.'),
+  items: z.array(z.string()).describe('list scenes only: 2 to 4 short points, each at most 5 words. Empty array otherwise.'),
   highlight: z.string().describe('One word or short phrase copied exactly from the headline to colour as the emphasis. Empty string for none.'),
   sub: z.string().describe('A supporting line, at most 12 words. Empty string for none.'),
   image: z.number().int().describe('Index of the image to show in this scene, or -1 for none.'),
@@ -55,6 +56,8 @@ Scene kinds:
 - hook: the opening. One bold line that makes the viewer care. Always the first scene.
 - feature: one benefit or selling point, with an image when a relevant one exists.
 - stat: one real number from the page, animated as a counter. The headline is the label for the number.
+- list: a short headline and 2 to 4 points that tick in one by one. Use it when the page lists several benefits, features or what is included.
+- quote: a customer's or reviewer's words, copied exactly from the page, with who said it in sub. Only when the page really has one; never write one yourself. The headline is the quote (it may be up to 22 words).
 - cta: the close. The headline is the last thing the viewer should remember; cta is the button label. Always the last scene.
 
 Rules that matter, and why:
@@ -62,6 +65,7 @@ Rules that matter, and why:
 - Use only what the page says. Never invent a price, a discount, a statistic, a review, an award or a guarantee: an ad that claims something the business does not offer is a legal problem for the person who publishes it. If the page has no usable number, write no stat scene.
 - Write for the customer, in their words, about what they get. Concrete beats clever. No hashtags, no emoji, no exclamation marks stacked together.
 - The page's pictures are attached, each labelled with its index. Look at them and choose by what they actually show. A video with pictures of the product sells better than type alone, so give most feature scenes a picture that matches their line, and the hook one when a strong picture exists. Do not use the same image twice unless there are too few. Screenshots and examples of what the product makes count as pictures of the product. Skip logos, pictures that are only text, and pictures unrelated to the line; use -1 for those scenes.
+- Use at most one list and one quote. A good eight-scene video might be: hook, feature, stat, feature, list, quote, feature, cta.
 - Variety keeps people watching. Do not make every scene the same kind of frame: mix scenes that show a page picture, scenes over stock footage (give visual a search phrase for a concrete, filmable subject: people, places, objects, never abstract ideas or brand names), and one or two scenes of type alone. Give at most three scenes a visual.
 - Pick a palette that feels like this brand, starting from the theme colour and page colours when they are given. Text must be clearly readable on the background, and the accent must stand out against it.
 - Write in the language of the page.`;
@@ -92,6 +96,9 @@ ${list(brief.paragraphs)}
 
 List items:
 ${list(brief.bullets)}
+
+Customer quotes on the page:
+${list(brief.quotes ?? [])}
 
 Buttons on the page:
 ${list(brief.buttons)}
@@ -171,11 +178,17 @@ export function numberInText(value, text) {
  */
 export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = false }) {
   const pageText = trustNumbers ? '' : briefText(brief);
+  const flat = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const flatPage = flat(pageText);
   const usable = (i) => Number.isInteger(i) && i >= 0 && i < brief.images.length;
 
   let scenes = (Array.isArray(raw?.scenes) ? raw.scenes : []).map((s) => {
-    let kind = ['hook', 'feature', 'stat', 'cta'].includes(s?.kind) ? s.kind : 'feature';
-    const headline = tidy(s?.headline, 8, 64);
+    let kind = ['hook', 'feature', 'stat', 'list', 'quote', 'cta'].includes(s?.kind) ? s.kind : 'feature';
+    const items = (Array.isArray(s?.items) ? s.items : []).map((item) => tidy(item, 6, 40)).filter(Boolean).slice(0, 4);
+    if (kind === 'list' && items.length < 2) kind = 'feature';
+    // A testimonial must be somebody's real words: it has to appear on the page.
+    if (kind === 'quote' && !trustNumbers && !(flat(s?.headline).length > 12 && flatPage.includes(flat(s?.headline)))) kind = 'feature';
+    const headline = kind === 'quote' ? tidy(s?.headline, 24, 170) : tidy(s?.headline, 8, 64);
     const statValue = Number(s?.statValue);
     // A counter may only show a number the page itself states.
     if (kind === 'stat' && !(trustNumbers ? statValue > 0 : numberInText(statValue, pageText))) kind = 'feature';
@@ -183,6 +196,7 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
     return {
       kind,
       headline,
+      items: kind === 'list' ? items : [],
       highlight: highlight && headline.toLowerCase().includes(highlight.toLowerCase()) ? highlight : '',
       sub: tidy(s?.sub, 14, 96),
       image: usable(s?.image) ? s.image : -1,
@@ -201,9 +215,9 @@ export function sanitizeStoryboard(raw, brief, { sceneCount, trustNumbers = fals
   // Shape: one hook first, one cta last, the right number in between.
   const middle = scenes.filter((s) => s.kind !== 'hook' && s.kind !== 'cta').slice(0, Math.max(sceneCount - 2, 0));
   const hook = scenes.find((s) => s.kind === 'hook') ??
-    { kind: 'hook', headline: tagline || brandName, highlight: '', sub: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
+    { kind: 'hook', headline: tagline || brandName, items: [], highlight: '', sub: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
   const cta = scenes.find((s) => s.kind === 'cta') ??
-    { kind: 'cta', headline: tagline || brandName, highlight: '', sub: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
+    { kind: 'cta', headline: tagline || brandName, items: [], highlight: '', sub: '', image: -1, visual: '', footage: -1, statValue: 0, statPrefix: '', statSuffix: '', cta: '' };
   if (!cta.cta) cta.cta = 'Learn more';
   scenes = [hook, ...middle, cta];
 

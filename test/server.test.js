@@ -41,7 +41,8 @@ test('a project can only be touched with its token', async () => {
 
     const config = await (await fetch(`${base}/api/config`)).json();
     assert.equal(config.ready, true);
-    assert.equal(config.formats.length, 3);
+    assert.equal(config.formats.length, 4);
+    assert.equal(config.styles.length, 6);
   } finally { close(); }
 });
 

@@ -55,7 +55,7 @@ link ─▶ scrape.js ─▶ pipeline.js ─▶ creative.js ─▶ compose.js + 
 2. **Collect** (`server/pipeline.js`). Pictures go into the Vidmoat library with
    `POST /v1/media/import` and are measured; tiny ones, banners and slivers are dropped.
 3. **Write** (`server/creative.js`). Claude returns a storyboard as structured output:
-   brand, palette, and scenes (`hook`, `feature`, `stat`, `cta`). It is then sanitised in
+   brand, palette, and scenes (`hook`, `feature`, `stat`, `list`, `quote`, `cta`). It is then sanitised in
    code: lengths clamped, colours repaired for contrast, and any counter whose number is
    not on the page is demoted, so the model cannot put an invented statistic in an ad.
 4. **Compose** (`server/compose.js`, `server/motion.js`). The storyboard becomes Vidmoat
@@ -75,10 +75,11 @@ scene, between a page picture, stock footage from Vidmoat's library (it writes t
 phrase), or type alone. Type-only scenes rotate through four compositions and three
 colour castings of the brand palette, so consecutive scenes never look the same.
 
-Three art directions (`LOOKS` in `server/motion.js`): **Punch** (condensed type from
-behind masks, highlight blocks, slab wipes), **Sleek** (soft light on a fine grid,
-blur-in type, drawn underlines) and **Playful** (round type that pops, pills, an iris
-wipe). Three canvases: 9:16, 1:1 and 16:9.
+Six art directions (`LOOKS` in `server/motion.js`): **Punch**, **Sleek**, **Playful**,
+**Editorial** (serif headlines, hairlines, italics), **Neon** (glowing type, scanlines) and
+**Brutal** (heavy caps, hard frames, hazard bands). Four canvases: 9:16, 4:5, 1:1 and 16:9.
+Six scene formats: hook, feature, counter, checklist, customer quote and closing card. A
+quote is only used when its words appear on the page.
 
 ## Things to know before you put it in front of people
 
