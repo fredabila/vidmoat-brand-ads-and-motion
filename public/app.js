@@ -17,24 +17,31 @@ const store = {
 
 // ---------- Options ----------
 
-function chips(host, name, items, selected) {
+const STYLE_DEMO = {
+  punch: 'Stop the <i>scroll</i>',
+  sleek: 'Made to <i>feel</i> premium',
+  playful: 'Say it with <i>joy</i>',
+};
+
+/** Radio options. `render` returns the visible part of one option. */
+function options(host, name, items, selected, render) {
   host.replaceChildren(...items.map((item) => {
     const label = document.createElement('label');
-    label.className = 'chip';
-    label.title = item.hint ?? '';
+    label.className = 'opt';
     const input = Object.assign(document.createElement('input'), { type: 'radio', name, value: item.id, checked: item.id === selected });
-    const span = document.createElement('span');
-    if (ASPECT_ICON[item.id] && name === 'format') {
-      const icon = document.createElement('i');
-      icon.style.width = `${ASPECT_ICON[item.id][0]}px`;
-      icon.style.height = `${ASPECT_ICON[item.id][1]}px`;
-      span.append(icon);
-    }
-    span.append(item.label);
-    label.append(input, span);
+    label.append(input, render(item));
     return label;
   }));
 }
+const el = (tag, className, html) => Object.assign(document.createElement(tag), { className, innerHTML: html });
+
+const styleCard = (item) => el('span', 'card',
+  `<span class="swatchDemo demo-${item.id}"><b>${STYLE_DEMO[item.id] ?? item.label}</b></span><strong>${item.label}</strong><small>${item.hint ?? ''}</small>`);
+const formatTile = (item) => {
+  const [w, h] = ASPECT_ICON[item.id] ?? [14, 14];
+  return el('span', 'tile', `<i style="width:${w * 2}px;height:${h * 2}px"></i>${item.label.split(' ').pop()}`);
+};
+const segment = (item) => el('span', 'segItem', `${item.label}${item.small ? `<small>${item.small}</small>` : ''}`);
 const picked = (name) => document.querySelector(`input[name="${name}"]:checked`)?.value;
 
 async function loadConfig() {
@@ -45,10 +52,10 @@ async function loadConfig() {
     showFormError('Could not reach the server. Reload the page.');
     return;
   }
-  chips($('formats'), 'format', config.formats, store.get('format') ?? 'vertical');
-  chips($('styles'), 'style', config.styles, store.get('style') ?? 'sleek');
-  chips($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes · ${l.label}` })), store.get('length') ?? 'standard');
-  chips($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad');
+  options($('formats'), 'format', config.formats, store.get('format') ?? 'vertical', formatTile);
+  options($('styles'), 'style', config.styles, store.get('style') ?? 'sleek', styleCard);
+  options($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes`, small: l.label })), store.get('length') ?? 'standard', segment);
+  options($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad', segment);
   $('accessRow').hidden = !config.needsAccessCode;
   $('access').value = store.get('access') ?? '';
   const notes = [];
@@ -204,9 +211,11 @@ function renderBoard(v) {
   $('swatches').replaceChildren(...SWATCHES.map(([key, name]) => {
     const label = document.createElement('label');
     label.className = 'swatch';
+    label.title = name;
     const input = Object.assign(document.createElement('input'), { type: 'color', value: sb.palette[key] });
+    input.setAttribute('aria-label', `${name} colour`);
     input.addEventListener('input', () => { sb.palette[key] = input.value; markDirty(); });
-    label.append(input, name);
+    label.append(input);
     return label;
   }));
   $('scenes').replaceChildren(...sb.scenes.map((scene, i) => {

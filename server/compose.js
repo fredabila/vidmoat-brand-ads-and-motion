@@ -14,7 +14,7 @@
 // - A mask is given in fractions of the canvas, centred on (x, y).
 // - Draw order is the order of the tracks array; two clips cannot overlap on one track.
 
-import { LOOKS, backLayer, frontLayer } from './motion.js';
+import { LOOKS, backLayer, frontLayer, inkOn, luminance } from './motion.js';
 
 export { highlightSpan, estimateText } from './motion.js';
 
@@ -25,9 +25,9 @@ export const FORMATS = {
 };
 
 export const STYLES = {
-  punch: { label: 'Punch', hint: 'Condensed type that slams in, slab wipes' },
-  sleek: { label: 'Sleek', hint: 'Soft light, fine grid, calm reveals' },
-  playful: { label: 'Playful', hint: 'Round type that pops, spinning shapes' },
+  punch: { label: 'Punch', hint: 'Condensed type that slams in, hard wipes. Loud.' },
+  sleek: { label: 'Sleek', hint: 'Soft light, tight type, calm reveals. Premium.' },
+  playful: { label: 'Playful', hint: 'Round type that pops, pills and stars. Warm.' },
 };
 
 /** Created in this order after the default tracks, so later names draw on top. */
@@ -120,6 +120,27 @@ export function frameImage(image, region, canvas) {
   return { rect, cropX: round(cropX), cropY: round(cropY), scale: round(k / fitted) };
 }
 
+function contrastRatio(a, b) {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Colour blocking: the same four brand colours, cast in different roles, so
+ * scenes can change colour without leaving the brand.
+ */
+export function themeFor(palette, name) {
+  if (name === 'accent') {
+    const ink = inkOn(palette.accent);
+    return { background: palette.accent, surface: mix(palette.accent, ink, 0.16), accent: ink, text: ink };
+  }
+  if (name === 'invert') {
+    const accent = contrastRatio(palette.accent, palette.text) >= 2.2 ? palette.accent : palette.background;
+    return { background: palette.text, surface: mix(palette.text, palette.accent, 0.14), accent, text: palette.background };
+  }
+  return palette;
+}
+
 /**
  * @param {object} input
  * @param {object} input.storyboard  sanitised storyboard (see creative.js)
@@ -132,7 +153,7 @@ export function frameImage(image, region, canvas) {
  * @param {{src:string}|null} input.music
  * @param {string} input.domain
  */
-export function compose({ storyboard, images = [], logo = null, canvas, format = 'vertical', style = 'sleek', tracks, music = null, domain = '' }) {
+export function compose({ storyboard, images = [], footage = [], logo = null, canvas, format = 'vertical', style = 'sleek', tracks, music = null, domain = '' }) {
   const lookName = LOOKS[style] ? style : 'sleek';
   const look = LOOKS[lookName];
   const layout = layoutFor(format, canvas);
@@ -146,6 +167,10 @@ export function compose({ storyboard, images = [], logo = null, canvas, format =
 
   let t = 0;
   let featureIndex = 0;
+  let soloIndex = 0;
+  let lastTheme = 'base';
+  let lastSolo = null;
+  const ROTATION = ['invert', 'accent', 'base'];
   storyboard.scenes.forEach((scene, i) => {
     const id = `s${i}`;
     const last = i === count - 1;
@@ -159,6 +184,18 @@ export function compose({ storyboard, images = [], logo = null, canvas, format =
     let textRegion = null;
     let textAlign = 'center';
     const showImage = Boolean(image) && (scene.kind === 'hook' || scene.kind === 'feature');
+    const clip = !showImage && scene.footage >= 0 && (scene.kind === 'hook' || scene.kind === 'feature') ? footage[scene.footage] : null;
+
+    // Scenes without a picture change colour from one to the next; scenes with one stay on the base palette.
+    let themeName = 'base';
+    if (!showImage && !clip && scene.kind !== 'hook' && scene.kind !== 'cta') {
+      // Not the colour of the scene before, and not the colour the last type-only scene used.
+      const ok = (name) => name !== lastTheme && !(scene.kind === 'stat' && name === 'base');
+      themeName = ROTATION.find((name) => ok(name) && name !== lastSolo) ?? ROTATION.find(ok) ?? 'base';
+      lastSolo = themeName;
+    }
+    lastTheme = themeName;
+    const theme = themeFor(palette, themeName);
 
     if (showImage && scene.kind === 'feature') {
       const slot = layout.feature[featureIndex % layout.feature.length];
@@ -205,6 +242,20 @@ export function compose({ storyboard, images = [], logo = null, canvas, format =
       push({ op: 'setColor', clipId: `${id}_img`, patch: { blur: image.hint === 'social card' ? 14 : 3, saturation: 85, brightness: 68 } });
     }
 
+    if (clip) {
+      // Stock footage fills the frame, muted and graded down, with a slow push under the words.
+      const cover = round(Math.max(W / clip.width, H / clip.height) / Math.min(W / clip.width, H / clip.height));
+      push({
+        op: 'addClip', clipId: `${id}_vid`, type: 'video', src: clip.src, start: round(t), duration: d, trackIndex: tracks.media,
+        mediaStart: 0, mediaDuration: clip.duration, patch: { scale: cover, muted: true, volume: 0 },
+      });
+      push({
+        op: 'setKeyframeTrack', clipId: `${id}_vid`, prop: 'scale',
+        keyframes: [{ time: 0, value: cover }, { time: d, value: round(cover * 1.08), easing: 'linear' }],
+      });
+      push({ op: 'setColor', clipId: `${id}_vid`, patch: { saturation: 90, brightness: 78 } });
+    }
+
     if (scene.kind === 'cta' && logo) {
       // The mark sits above the closing line and settles in with a small overshoot.
       const size = Math.round(Math.min(W, H) * 0.15);
@@ -216,24 +267,32 @@ export function compose({ storyboard, images = [], logo = null, canvas, format =
       push({ op: 'setKeyframeTrack', clipId: `${id}_logo`, prop: 'opacity', keyframes: [{ time: 0, value: 0 }, { time: 0.2, value: 1 }] });
     }
 
-    const shared = { look, lookName, palette, canvas, index: i, brand: storyboard.brandName };
+    const shared = { look, lookName, palette: theme, wipePalette: palette, canvas, index: i, brand: storyboard.brandName };
     // A full-bleed opening picture hides the background, so none is laid under it.
     const back = backLayer(`${id}b-`, { ...shared, plate });
-    if (!(showImage && scene.kind === 'hook')) push({ op: 'addHtmlElement', clipId: `${id}_back`, name: `Scene ${i + 1} background`, html: back.html, css: back.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.back });
+    if (!(showImage && scene.kind === 'hook') && !clip) push({ op: 'addHtmlElement', clipId: `${id}_back`, name: `Scene ${i + 1} background`, html: back.html, css: back.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.back });
 
     // With a logo on the closing card, the words move down to make room for it.
     const ctaLayout = scene.kind === 'cta' && logo
       ? { ...layout, cta: { ...layout.cta, y: layout.cta.y + Math.min(W, H) * 0.1, height: layout.cta.height - Math.min(W, H) * 0.1 } }
       : layout;
     const front = frontLayer(`${id}f-`, {
-      ...shared, scene, layout: ctaLayout, count, duration: d, domain, hasImage: showImage, textRegion, textAlign,
+      ...shared, scene, layout: ctaLayout, count, duration: d, domain, hasImage: showImage, overMedia: Boolean(clip), textRegion, textAlign,
+      soloVariant: soloIndex,
     });
+    if (!showImage && !clip && scene.kind === 'feature') soloIndex += 1;
     push({ op: 'addHtmlElement', clipId: `${id}_front`, name: `Scene ${i + 1} type`, html: front.html, css: front.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.front });
 
     t = round(t + d);
   });
 
   const duration = round(t);
+  // 8.06 + 4.36 is 12.420000000000002 in floating point, which the timeline reads as
+  // overlapping the next scene and moves the clip to a new track. End every clip a
+  // microsecond early so back-to-back clips never touch.
+  for (const cmd of commands) {
+    if (cmd.op.startsWith('add') && typeof cmd.duration === 'number') cmd.duration = Math.round((cmd.duration - 0.000001) * 1e6) / 1e6;
+  }
   if (music?.src) {
     push({ op: 'musicBed', clipId: 'music', src: music.src, volume: 0.32, fadeIn: 0.6, fadeOut: 1.4, duck: false, end: duration });
   }

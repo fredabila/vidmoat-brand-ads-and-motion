@@ -259,6 +259,7 @@ function box(cls, r, extra = '') {
 
 /** Headline plus supporting line inside a region, aligned start, center or end. */
 function textRegion(p, scene, region, { look, palette, at, base, subSize, align = 'center', centred = false }) {
+  region = { ...region, x: Math.round(region.x), y: Math.round(region.y), width: Math.round(region.width), height: Math.round(region.height) };
   const subHeight = scene.sub ? estimateText(scene.sub, subSize, region.width, 0.5, 1.28).height + subSize * 0.7 : 0;
   const size = fitFont(scene.headline, base, { width: region.width, height: Math.max(region.height - subHeight, 80) }, look);
   const words = kineticWords(p, scene.headline, { at, look, palette, highlight: scene.highlight });
@@ -300,9 +301,10 @@ function odometer(p, scene, { at, palette, size }) {
  */
 export function frontLayer(p, ctx) {
   const { scene, look, lookName, palette, canvas, layout, index, count, brand, duration, domain, hasImage } = ctx;
+  const overMedia = Boolean(ctx.overMedia);
   const { width: W, height: H } = canvas;
   const vertical = W <= H;
-  const wipe = wipes(p, { look, palette, duration, vertical, enter: index > 0, exit: index < count - 1, reach: Math.max(W, H) });
+  const wipe = wipes(p, { look, palette: ctx.wipePalette ?? palette, duration, vertical, enter: index > 0, exit: index < count - 1, reach: Math.max(W, H) });
   const at = wipe.enterTime + 0.08; // type starts as the panels clear
   const bar = topBar(p, { brand, index, count, palette, frame: layout.frame });
   let body = '';
@@ -311,13 +313,13 @@ export function frontLayer(p, ctx) {
 .${p}tx{position:absolute;display:flex;flex-direction:column}` + typeCss(p, look, palette) + bar.css + wipe.css;
   const common = { look, palette, at, subSize: layout.subSize };
 
-  if (scene.kind === 'hook') {
-    if (hasImage) {
+  if (scene.kind === 'hook' || overMedia) {
+    if (hasImage || overMedia) {
       // A scrim that is heaviest where the words sit.
       body += `<div class="${p}scrim"></div>`;
       css += `\n.${p}scrim{position:absolute;inset:0;background:linear-gradient(${vertical ? '180deg' : '270deg'},${rgba(palette.background, 0.62)} 0%,${rgba(palette.background, 0.78)} 45%,${rgba(palette.background, 0.96)} 100%)}`;
     }
-    body += textRegion(p, scene, layout.hook, { ...common, base: layout.heroSize, align: hasImage && vertical ? 'end' : 'center' });
+    body += textRegion(p, scene, layout.hook, { ...common, base: scene.kind === 'hook' ? layout.heroSize : layout.soloSize, align: (hasImage || overMedia) && vertical ? 'end' : 'center' });
   } else if (scene.kind === 'stat') {
     const r = layout.stat;
     const odo = odometer(p, scene, { at: at + 0.1, palette, size: fitFont(Math.round(scene.statValue).toLocaleString('en-US') + scene.statPrefix + scene.statSuffix, layout.statSize, { width: r.width, height: 9999 }, { ...LOOKS.punch, sizeBoost: 1, charWidth: 0.5 }) });
@@ -353,7 +355,35 @@ export function frontLayer(p, ctx) {
   } else if (hasImage) {
     body += textRegion(p, scene, ctx.textRegion, { ...common, base: layout.headSize, align: ctx.textAlign });
   } else {
-    body += textRegion(p, scene, layout.solo, { ...common, base: layout.soloSize, align: 'center' });
+    // Type-only scenes take turns between four compositions so no two in a row look alike.
+    const variant = (ctx.soloVariant ?? 0) % 4;
+    const r = layout.solo;
+    if (variant === 1) {
+      // A giant outlined scene number above a headline that sits low in the frame.
+      const numSize = Math.round(Math.min(W, H) * 0.42);
+      const rise = easeOut(prog(at, 0.9));
+      body += `<div class="${p}ix" style="left:${r.x}px;top:${Math.round(r.y - numSize * 0.08)}px;font-size:${numSize}px;transform:translateY(calc((1 - ${rise}) * 60px));opacity:calc(${rise})">${String(index).padStart(2, '0')}</div>`;
+      css += `\n.${p}ix{position:absolute;font-family:'Anton',sans-serif;font-weight:400;line-height:1;color:transparent;-webkit-text-stroke:3px ${palette.accent}}`;
+      body += textRegion(p, scene, { ...r, y: r.y + r.height * 0.4, height: r.height * 0.6 }, { ...common, at: at + 0.15, base: layout.soloSize * 0.86, align: 'end' });
+    } else if (variant === 2) {
+      // Everything centred, the supporting line in a pill.
+      body += textRegion(p, { ...scene, sub: '' }, { ...r, height: r.height * 0.62 }, { ...common, base: layout.soloSize, align: 'end', centred: true });
+      if (scene.sub) {
+        const pillAt = at + 0.7;
+        body += box(`${p}tx`, { ...r, y: r.y + r.height * 0.62 + 44, height: r.height * 0.3 }, 'align-items:center;') +
+          `<div class="${p}pill" style="transform:scale(calc(${backOut(prog(pillAt, 0.55))}));opacity:${prog(pillAt, 0.15)}">${esc(scene.sub)}</div></div>`;
+        css += `\n.${p}pill{font-family:${BODY};font-weight:600;font-size:${Math.round(layout.subSize * 0.92)}px;line-height:1.25;text-align:center;color:${inkOn(palette.accent)};background:${palette.accent};padding:0.5em 1em;border-radius:1.4em;max-width:92%}`;
+      }
+    } else if (variant === 3) {
+      // A thick rule draws across, and the headline hangs from it at the bottom.
+      const rule = easeOut(prog(at, 0.8));
+      const y = r.y + r.height * 0.46;
+      body += `<div class="${p}rl" style="left:${r.x}px;top:${Math.round(y)}px;width:${r.width}px;transform:scaleX(calc(${rule}))"></div>`;
+      css += `\n.${p}rl{position:absolute;height:10px;background:${palette.accent};transform-origin:0 50%;border-radius:5px}`;
+      body += textRegion(p, scene, { ...r, y: y + 54, height: r.y + r.height - y - 54 }, { ...common, at: at + 0.2, base: layout.soloSize * 0.9, align: 'start' });
+    } else {
+      body += textRegion(p, scene, r, { ...common, base: layout.soloSize, align: 'center' });
+    }
   }
 
   return { html: `<div class="${p}root">${body}${bar.html}${wipe.html}</div>`, css, typeAt: at };

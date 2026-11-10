@@ -5,57 +5,85 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LinkReel: paste a link, get an ad</title>
   <meta name="description" content="Paste a link to any product or website and get a motion video or ad in seconds.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff5a36'/%3E%3Cpath d='M12 9.5v13l11-6.5z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23ff4b1f'/%3E%3Cpath d='M12 9.5v13l11-6.5z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Titan+One&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="/" aria-label="LinkReel home">
-      <span class="mark" aria-hidden="true"></span>LinkReel
-    </a>
-    <span class="powered">Built on the Vidmoat API and Claude</span>
+    <a class="brand" href="/" aria-label="LinkReel home"><span class="mark" aria-hidden="true"></span>LinkReel</a>
+    <span class="tag">Link in. Motion out.</span>
   </header>
 
   <main>
     <section class="hero" id="hero">
-      <h1>Paste a link.<br><em>Get an ad.</em></h1>
-      <p class="lede">Drop in a product page or website. LinkReel reads it, writes the script, and builds a motion video in the brand's own colours and pictures.</p>
+      <div class="heroCopy">
+        <p class="eyebrow">Motion ads from any URL</p>
+        <h1>Paste a link.<br>Get <em>the ad.</em></h1>
+        <p class="lede">LinkReel reads the page, writes the script and builds a motion video in the brand's own colours, pictures and words. Preview it instantly, fix any line, export an MP4.</p>
 
-      <form id="make" class="make" novalidate>
-        <div class="linkbar">
-          <label class="sr" for="url">Link to a product page or website</label>
-          <input id="url" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false"
-                 placeholder="https://yourbrand.com/product" required>
-          <button id="go" type="submit">Make my video</button>
-        </div>
-        <p id="formError" class="error" role="alert" hidden></p>
+        <form id="make" class="make" novalidate>
+          <div class="linkbar">
+            <label class="sr" for="url">Link to a product page or website</label>
+            <span class="linkIcon" aria-hidden="true">↗</span>
+            <input id="url" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="yourbrand.com/product" required>
+            <button id="go" type="submit">Make my video</button>
+          </div>
+          <p id="formError" class="error" role="alert" hidden></p>
+          <p id="setupNote" class="note" hidden></p>
 
-        <div class="options">
-          <fieldset>
-            <legend>Format</legend>
-            <div class="chips" id="formats"></div>
-          </fieldset>
-          <fieldset>
-            <legend>Style</legend>
-            <div class="chips" id="styles"></div>
-          </fieldset>
-          <fieldset>
-            <legend>Length</legend>
-            <div class="chips" id="lengths"></div>
-          </fieldset>
-          <fieldset>
-            <legend>Goal</legend>
-            <div class="chips" id="goals"></div>
-          </fieldset>
-        </div>
-        <label class="check"><input type="checkbox" id="music" checked> Add a music bed</label>
-        <div id="accessRow" class="access" hidden>
-          <label for="access">Access code</label>
-          <input id="access" type="password" autocomplete="off">
-        </div>
-      </form>
+          <div class="deck">
+            <fieldset class="wideField">
+              <legend><span>01</span> Look</legend>
+              <div class="cards" id="styles"></div>
+            </fieldset>
+            <fieldset>
+              <legend><span>02</span> Canvas</legend>
+              <div class="tiles" id="formats"></div>
+            </fieldset>
+            <fieldset>
+              <legend><span>03</span> Length</legend>
+              <div class="seg" id="lengths"></div>
+            </fieldset>
+            <fieldset>
+              <legend><span>04</span> Goal</legend>
+              <div class="seg" id="goals"></div>
+            </fieldset>
+          </div>
+          <div class="extras">
+            <label class="check"><input type="checkbox" id="music" checked> Music bed</label>
+            <div id="accessRow" class="access" hidden>
+              <label for="access">Access code</label>
+              <input id="access" type="password" autocomplete="off">
+            </div>
+          </div>
+        </form>
+      </div>
 
-      <p id="setupNote" class="note" hidden></p>
+      <div class="heroDemo" aria-hidden="true">
+        <div class="phone">
+          <div class="screen">
+            <div class="slide s1">
+              <span class="bars"><i></i><i></i><i></i></span>
+              <p class="k"><span><b>Still</b></span> <span><b>charging</b></span><br><span class="hl"><b>every night?</b></span></p>
+            </div>
+            <div class="slide s2">
+              <span class="bars"><i></i><i></i><i></i></span>
+              <p class="num">14</p>
+              <p class="cap">days on one charge</p>
+            </div>
+            <div class="slide s3">
+              <span class="bars"><i></i><i></i><i></i></span>
+              <p class="t">Live more,<br>charge less</p>
+              <span class="pillBtn">Shop now →</span>
+            </div>
+          </div>
+        </div>
+        <span class="sticker st1">no editing</span>
+        <span class="sticker st2">~30 sec</span>
+      </div>
     </section>
 
     <section id="progress" class="progress" hidden aria-live="polite">
@@ -76,14 +104,13 @@
             <div id="playerHost"></div>
             <button id="bigPlay" class="bigPlay" type="button" aria-label="Play preview" hidden></button>
           </div>
+          <div class="transport">
+            <button id="playBtn" type="button" class="ghost dark" disabled>Play</button>
+            <div class="scrub" id="scrub" aria-hidden="true"><div id="scrubFill"></div></div>
+            <span id="clock" class="clock">0:00</span>
+          </div>
+          <p id="previewNote" class="hint onDark"></p>
         </div>
-        <div class="transport">
-          <button id="playBtn" type="button" class="ghost" disabled>Play</button>
-          <div class="scrub" id="scrub" aria-hidden="true"><div id="scrubFill"></div></div>
-          <span id="clock" class="clock">0:00</span>
-        </div>
-        <p id="previewNote" class="hint"></p>
-
         <div class="deliver">
           <button id="renderBtn" type="button" class="primary">Render MP4</button>
           <a id="download" class="ghost" hidden download>Download MP4</a>
@@ -96,22 +123,29 @@
       <div class="boardCol">
         <div class="boardHead">
           <div>
+            <p class="eyebrow">Storyboard</p>
             <h2 id="videoTitle">Your video</h2>
             <p id="videoMeta" class="hint"></p>
           </div>
           <button id="apply" type="button" class="primary" disabled>Apply changes</button>
         </div>
         <ul id="notices" class="notices"></ul>
-
-        <div class="field brandField">
-          <label for="brandName">Brand name</label>
-          <input id="brandName" type="text" maxlength="40">
+        <div class="brandRow">
+          <div class="field brandField">
+            <label for="brandName">Brand name</label>
+            <input id="brandName" type="text" maxlength="40">
+          </div>
+          <div class="swatches" id="swatches" aria-label="Colours"></div>
         </div>
-        <div class="swatches" id="swatches" aria-label="Colours"></div>
-
         <ol id="scenes" class="scenes"></ol>
         <p id="musicCredit" class="hint"></p>
       </div>
+    </section>
+
+    <section class="how" id="how">
+      <div><span>1</span><h3>It reads the page</h3><p>Name, copy, pictures, colours, prices. Only what the page actually says goes in the ad.</p></div>
+      <div><span>2</span><h3>Claude writes the script</h3><p>A hook, the points that sell, a real number if there is one, and one clear call to action.</p></div>
+      <div><span>3</span><h3>Vidmoat builds the motion</h3><p>Kinetic type, picture reveals, footage, counters and wipes on a real timeline you can keep editing.</p></div>
     </section>
   </main>
 

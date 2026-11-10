@@ -33,7 +33,8 @@ for (const format of Object.keys(FORMATS)) {
       // Two clips never share a track at the same time (the API would move one).
       for (const track of Object.values(tracks)) {
         const onTrack = clips.filter((c) => c.trackIndex === track).sort((a, b) => a.start - b.start);
-        for (let i = 1; i < onTrack.length; i++) assert.ok(onTrack[i].start >= onTrack[i - 1].start + onTrack[i - 1].duration - 0.011, `overlap on track ${track}`);
+        // Strictly: in floating point 8.06 + 4.36 > 12.42, and the API moves a clip that touches the next.
+        for (let i = 1; i < onTrack.length; i++) assert.ok(onTrack[i].start >= onTrack[i - 1].start + onTrack[i - 1].duration, `overlap on track ${track}`);
       }
       // Picture always has a background from the first frame to the last.
       const cover = clips.filter((c) => c.trackIndex === tracks.back || (c.type === 'image' && c.clipId === 's0_img'));

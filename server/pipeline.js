@@ -4,7 +4,7 @@
 import { imageSize } from 'image-size';
 import { readLink } from './scrape.js';
 import { writeStoryboard, sanitizeStoryboard, LENGTHS } from './creative.js';
-import { compose, setupCommands, FORMATS, STYLES, TRACK_ORDER } from './compose.js';
+import { compose, setupCommands, sceneDuration, FORMATS, STYLES, TRACK_ORDER } from './compose.js';
 
 const MEDIA_PREFIX = 'https://api.vidmoat.com/uploads/';
 const MAX_IMAGES = 6;
@@ -32,7 +32,7 @@ async function importImage(vidmoat, url, { fetchImpl = fetch, minWidth = 320, mi
   if (!width || !height || width < minWidth || height < minHeight) return null;
   const ratio = width / height;
   if (ratio > 3.4 || ratio < 0.3) return null; // banners and slivers make bad cards
-  return { src: media.url, width, height };
+  return { src: media.url, width, height, contentType: media.contentType ?? '' };
 }
 
 async function importAssets(brief, vidmoat, deps) {
@@ -61,8 +61,41 @@ async function findMusic(vidmoat, query, videoSeconds) {
   return { src: media.url, name: pick.name ?? 'Stock music', credit: pick.username ?? null, sourceUrl: pick.sourceUrl ?? null };
 }
 
+/** Stock footage for one scene, in the canvas's orientation. Null when nothing suitable is found. */
+async function findFootage(vidmoat, query, format, seconds) {
+  const { data = [] } = await vidmoat.searchStock(query, 'video', 10);
+  const fits = (r) => r.downloadUrl && r.width && r.height && (r.duration ?? 0) >= seconds;
+  const oriented = (r) => (format === 'vertical' ? r.height > r.width : format === 'wide' ? r.width > r.height : true);
+  const pick = data.find((r) => fits(r) && oriented(r)) ?? data.find(fits);
+  if (!pick) return null;
+  const { media } = await vidmoat.importMedia(pick.downloadUrl);
+  if (media?.mediaType !== 'video') return null;
+  return { src: media.url, width: pick.width, height: pick.height, duration: media.durationSec ?? pick.duration, credit: pick.photographer ?? null };
+}
+
+const MAX_FOOTAGE = 3;
+
+/** Fetch a backdrop for each scene that asked for one, and point the scene at it. */
+async function attachFootage(vidmoat, storyboard, format, log) {
+  const wanted = storyboard.scenes.filter((sc) => sc.visual && sc.image < 0).slice(0, MAX_FOOTAGE);
+  const found = await Promise.all(wanted.map((sc) =>
+    findFootage(vidmoat, sc.visual, format, sceneDuration(sc) + 0.5).catch((err) => { log(`footage "${sc.visual}": ${err.message}`); return null; })));
+  const footage = [];
+  wanted.forEach((sc, i) => {
+    if (!found[i]) return;
+    sc.footage = footage.length;
+    footage.push(found[i]);
+  });
+  return footage;
+}
+
 function failures(results) {
-  return (results ?? []).filter((r) => r && r.ok === false).map((r) => `${r.op}: ${r.error ?? 'failed'}`);
+  return (results ?? []).flatMap((r) => {
+    if (r && r.ok === false) return [`${r.op}: ${r.error ?? 'failed'}`];
+    // A clip the timeline had to move is on the wrong layer: say so rather than ship it quietly.
+    if (r?.data?.warning) return [`${r.op} ${r.data.clipId ?? ''}: ${r.data.warning}`];
+    return [];
+  });
 }
 
 async function applyAll(vidmoat, projectId, commands) {
@@ -114,7 +147,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   emit('media', 'active');
   const assets = await importAssets(brief, vidmoat, fetchImpl ? { fetchImpl } : undefined);
   // From here on, image numbers mean "usable, imported pictures".
-  brief.images = assets.images.map((img) => ({ alt: img.alt, hint: img.hint, width: img.width, height: img.height }));
+  brief.images = assets.images.map((img) => ({ alt: img.alt, hint: img.hint, width: img.width, height: img.height, src: img.src, contentType: img.contentType }));
   emit('media', 'done', `${assets.images.length} image${assets.images.length === 1 ? '' : 's'}`);
 
   emit('write', 'active');
@@ -124,10 +157,12 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   emit('write', 'done', source === 'claude' ? `${storyboard.scenes.length} scenes` : 'Written from the page text');
 
   emit('build', 'active');
-  const [created, music] = await Promise.all([
+  const [created, music, footage] = await Promise.all([
     vidmoat.createProject(`LinkReel · ${storyboard.brandName} · ${FORMATS[format].aspectRatio}`, setupCommands(format, storyboard.palette.background)),
     input.music === false ? null : findMusic(vidmoat, storyboard.musicQuery, 30).catch((err) => { log(`music: ${err.message}`); return null; }),
+    attachFootage(vidmoat, storyboard, format, log),
   ]);
+  assets.footage = footage;
   const projectId = created.project.id;
   const trackIds = (created.results ?? []).filter((r) => r.op === 'addTrack' && r.ok).map((r) => r.data?.trackId);
   if (trackIds.length !== TRACK_ORDER.length || trackIds.some((id) => typeof id !== 'number')) {
@@ -136,7 +171,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   const tracks = Object.fromEntries(TRACK_ORDER.map((name, i) => [name, trackIds[i]]));
   const canvas = { width: created.project.settings.width, height: created.project.settings.height };
 
-  const composed = compose({ storyboard, images: assets.images, logo: assets.logo, canvas, format, style, tracks, music, domain: brief.domain });
+  const composed = compose({ storyboard, images: assets.images, footage, logo: assets.logo, canvas, format, style, tracks, music, domain: brief.domain });
   const { problems, lint } = await applyAll(vidmoat, projectId, composed.commands);
   const document = await vidmoat.getDocument(projectId);
   emit('build', 'done', `${composed.duration.toFixed(1)}s`);
@@ -157,21 +192,24 @@ export async function rebuildVideo(input, { vidmoat }) {
   const images = (Array.isArray(input.assets?.images) ? input.assets.images : []).slice(0, MAX_IMAGES).filter(checkAsset)
     .map(({ src, width, height, alt, hint }) => ({ src, width, height, alt: String(alt ?? ''), hint: String(hint ?? '') }));
   const logo = checkAsset(input.assets?.logo) ? { src: input.assets.logo.src, width: input.assets.logo.width, height: input.assets.logo.height } : null;
+  const footage = (Array.isArray(input.assets?.footage) ? input.assets.footage : []).slice(0, MAX_FOOTAGE)
+    .filter((f) => checkAsset(f) && Number.isFinite(f.duration) && f.duration > 0)
+    .map(({ src, width, height, duration }) => ({ src, width, height, duration }));
   const music = typeof input.music?.src === 'string' && input.music.src.startsWith(MEDIA_PREFIX) ? input.music : null;
 
   const sceneCount = Math.min(Math.max(input.storyboard?.scenes?.length ?? 0, 2), 10);
-  const storyboard = sanitizeStoryboard(input.storyboard, { images, siteName: 'Brand', title: '', domain: '' }, { sceneCount, trustNumbers: true });
+  const storyboard = sanitizeStoryboard(input.storyboard, { images, footage, siteName: 'Brand', title: '', domain: '' }, { sceneCount, trustNumbers: true });
 
   const before = await vidmoat.getDocument(input.projectId);
   const tracks = tracksFromDocument(before);
   const canvas = { width: before.settings.width, height: before.settings.height };
   const domain = String(input.domain ?? '').replace(/[^a-z0-9.-]/gi, '').slice(0, 80);
-  const composed = compose({ storyboard, images, logo, canvas, format, style, tracks, music, domain });
+  const composed = compose({ storyboard, images, footage, logo, canvas, format, style, tracks, music, domain });
   const { problems, lint } = await applyAll(vidmoat, input.projectId, [
     { op: 'clearTimeline' },
     { op: 'setProjectSettings', background: storyboard.palette.background },
     ...composed.commands,
   ]);
   const document = await vidmoat.getDocument(input.projectId);
-  return describe({ projectId: input.projectId, storyboard, assets: { images, logo }, music, composed, document, lint, problems, format, style });
+  return describe({ projectId: input.projectId, storyboard, assets: { images, logo, footage }, music, composed, document, lint, problems, format, style });
 }

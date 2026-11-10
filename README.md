@@ -70,6 +70,11 @@ link ─▶ scrape.js ─▶ pipeline.js ─▶ creative.js ─▶ compose.js + 
 7. **Render**. `POST /v1/renders`, then a five-second poll. A render already running for
    the project is picked up rather than queued twice.
 
+Scenes are deliberately not all alike. Claude is shown the page's pictures and chooses, per
+scene, between a page picture, stock footage from Vidmoat's library (it writes the search
+phrase), or type alone. Type-only scenes rotate through four compositions and three
+colour castings of the brand palette, so consecutive scenes never look the same.
+
 Three art directions (`LOOKS` in `server/motion.js`): **Punch** (condensed type from
 behind masks, highlight blocks, slab wipes), **Sleek** (soft light on a fine grid,
 blur-in type, drawn underlines) and **Playful** (round type that pops, pills, an iris
