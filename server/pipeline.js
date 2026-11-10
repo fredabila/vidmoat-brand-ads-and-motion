@@ -128,20 +128,30 @@ async function attachFootage(vidmoat, storyboard, format, log) {
  * Have Claude design every custom scene, all at once. A scene whose design does
  * not come back, or does not pass the gate, becomes an ordinary feature scene.
  */
-async function designCustomScenes(client, storyboard, { format, style, log }) {
+async function designCustomScenes(client, storyboard, { format, style, images = [], log }) {
   const canvas = FORMATS[format];
   const look = LOOKS[style];
   const safe = layoutFor(format, canvas).solo;
   const notes = [];
+  const directed = storyboard.directed === true;
+  const line = (sc) => (sc ? `${sc.kind}: ${sc.brief || sc.headline}`.slice(0, 300) : null);
   await Promise.all(storyboard.scenes.map(async (scene, i) => {
-    if (scene.kind !== 'custom' || scene.design) return;
-    const out = client
-      ? await designScene(client, { scene, canvas, safe, palette: themeFor(storyboard.palette, 'base'), look, brand: storyboard.brandName }, { log })
-      : { design: null, reason: 'Claude is not connected' };
+    // With Claude as art director every scene is drawn; otherwise only the ones it marked custom.
+    if (scene.design || (!directed && scene.kind !== 'custom')) return;
+    const picture = scene.image >= 0 ? images[scene.image] : null;
+    const base = { scene, canvas, safe, palette: themeFor(storyboard.palette, 'base'), brand: storyboard.brandName };
+    const ctx = directed ? {
+      ...base, direction: storyboard.direction, index: i, count: storyboard.scenes.length,
+      neighbours: { before: line(storyboard.scenes[i - 1]), after: line(storyboard.scenes[i + 1]) },
+      media: picture ? `one picture, ${picture.width} x ${picture.height} pixels, attached${picture.alt ? ` (${picture.alt})` : ''}`
+        : scene.visual ? `stock footage of "${scene.visual}" fills the frame behind you` : null,
+      picture: picture && /^image\/(jpeg|png|gif|webp)$/i.test(picture.contentType ?? '') ? picture.src : null,
+    } : { ...base, look };
+    const out = client ? await designScene(client, ctx, { log }) : { design: null, reason: 'Claude is not connected' };
     scene.design = out.design;
     if (!scene.design) {
       notes.push(`Scene ${i + 1} was meant to be designed by Claude but fell back to a standard scene (${out.reason}).`);
-      scene.kind = 'feature'; scene.brief = ''; scene.items = [];
+      if (scene.kind === 'custom') { scene.kind = 'feature'; scene.items = []; }
     }
   }));
   return notes;
@@ -210,7 +220,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   emit('media', 'done', `${assets.images.length} image${assets.images.length === 1 ? '' : 's'}`);
 
   emit('write', 'active');
-  const freedom = input.freedom === 'guided' ? 'guided' : 'free';
+  const freedom = ['guided', 'free', 'full'].includes(input.freedom) ? input.freedom : 'full';
   const { storyboard, source, reason } = await writeStoryboard(brief, {
     goal: input.goal, length, format: FORMATS[format].label, freedom, client: anthropic, log,
   });
@@ -223,7 +233,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
     input.music === false ? null : findMusic(vidmoat, storyboard.musicQuery, 30).catch((err) => { log(`music: ${err.message}`); return null; }),
     attachFootage(vidmoat, storyboard, format, log),
     input.voiceover === false ? [] : recordVoices(vidmoat, storyboard, voiceId, { fetchImpl, log }),
-    designCustomScenes(anthropic ?? (claudeConfigured() ? new Anthropic() : null), storyboard, { format, style, log }),
+    designCustomScenes(anthropic ?? (claudeConfigured() ? new Anthropic() : null), storyboard, { format, style, images: assets.images, log }),
   ]);
   assets.footage = footage;
   assets.voices = voices;

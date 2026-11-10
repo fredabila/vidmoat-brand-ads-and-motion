@@ -60,9 +60,13 @@ async function loadConfig() {
   options($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes`, small: l.label })), store.get('length') ?? 'standard', segment);
   options($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad', segment);
   options($('freedoms'), 'freedom', [
-    { id: 'free', label: 'Claude designs scenes', small: 'original scenes built for this page' },
-    { id: 'guided', label: 'Templates only', small: 'faster, more predictable' },
-  ], store.get('freedom') ?? 'free', segment);
+    { id: 'full', label: 'Claude art-directs', small: 'no template: every scene drawn for this page' },
+    { id: 'free', label: 'Claude adds scenes', small: 'a look below, plus scenes of its own' },
+    { id: 'guided', label: 'Templates only', small: 'fastest, most predictable' },
+  ], store.get('freedom') ?? 'full', segment);
+  const syncLook = () => $('styles').classList.toggle('off', picked('freedom') === 'full');
+  $('freedoms').addEventListener('change', syncLook);
+  syncLook();
   $('voice').replaceChildren(...(config.voices ?? []).map((v) => Object.assign(document.createElement('option'), { value: v.id, textContent: v.label })));
   if (store.get('voice')) $('voice').value = store.get('voice');
   $('voiceover').checked = store.get('voiceover') !== 'off';
@@ -248,7 +252,7 @@ function renderBoard(v) {
     if (scene.kind === 'list') {
       fields.append(field('Points (separate with ;)', (scene.items ?? []).join('; '), (val) => { scene.items = val.split(';').map((t) => t.trim()).filter(Boolean); }, { maxLength: 180 }));
     }
-    if (scene.kind === 'custom') {
+    if (scene.design) {
       // Claude drew this scene itself; its words live in the design, so only the narration is editable.
       fields.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint designed', textContent: `Designed by Claude: ${scene.brief || scene.headline}` }));
       if (v.assets?.voiceId) fields.append(field('Narration', scene.voice, (val) => { scene.voice = val; }, { maxLength: 220 }));

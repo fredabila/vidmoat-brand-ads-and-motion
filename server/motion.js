@@ -382,16 +382,28 @@ export function frontLayer(p, ctx) {
   const overMedia = Boolean(ctx.overMedia);
   const { width: W, height: H } = canvas;
   const vertical = W <= H;
-  const wipe = wipes(p, { look, palette: ctx.wipePalette ?? palette, duration, vertical, enter: index > 0, exit: index < count - 1, reach: Math.max(W, H) });
+  // The art director may have chosen the film's scene change; 'cut' means none at all.
+  const cut = ctx.wipeStyle === 'cut';
+  const wipe = wipes(p, { look: ctx.wipeStyle && !cut ? { ...look, wipe: ctx.wipeStyle } : look, palette: ctx.wipePalette ?? palette, duration, vertical, enter: !cut && index > 0, exit: !cut && index < count - 1, reach: Math.max(W, H) });
   const at = wipe.enterTime + 0.08; // type starts as the panels clear
-  const bar = topBar(p, { brand, index, count, palette, frame: layout.frame });
+  // A scene that owns its frame gets no brand bar: the designer places the brand itself.
+  const bar = ctx.bare ? { html: '', css: '' } : topBar(p, { brand, index, count, palette, frame: layout.frame });
   let body = '';
   let css = `
 .${p}root{position:relative;width:100%;height:100%;overflow:hidden}
 .${p}tx{position:absolute;display:flex;flex-direction:column}` + typeCss(p, look, palette) + bar.css + wipe.css;
   const common = { look, palette, at, subSize: layout.subSize };
 
-  if (scene.kind === 'hook' || overMedia) {
+  if (ctx.design) {
+    // A scene Claude designed itself. It arrives sanitised and namespaced (freeform.js);
+    // the palette reaches it as variables so the colour casting still applies.
+    const vars = `--bg:${palette.background};--surface:${palette.surface};--accent:${palette.accent};--text:${palette.text};--on-accent:${inkOn(palette.accent)}`;
+    body += `<div class="${p}cu" style="${vars}">${ctx.design.html}</div>`;
+    // Naming each family in a rule here is what gets it embedded for the design to use.
+    const fonts = [...new Set(['Inter', ...(ctx.fonts ?? [look.headFont])])];
+    css += `\n.${p}cu{position:absolute;left:0;top:0;width:100%;height:100%;color:${palette.text}}` +
+      fonts.map((f, k) => `\n.${p}cf${k}{font-family:'${f}',sans-serif}`).join('') + `\n${ctx.design.css}`;
+  } else if (scene.kind === 'hook' || overMedia) {
     if (hasImage || overMedia) {
       // A scrim that is heaviest where the words sit.
       body += `<div class="${p}scrim"></div>`;
@@ -413,13 +425,6 @@ export function frontLayer(p, ctx) {
       (scene.sub ? `<div class="${p}sb" style="font-size:${layout.subSize}px;margin-top:${Math.round(layout.subSize * 0.6)}px;${subStyle(at + 1.3)}">${esc(scene.sub)}</div>` : '') +
       '</div>';
     css += odo.css + `\n.${p}rule{height:8px;width:${Math.round(r.width * 0.42)}px;background:${palette.text};transform-origin:0 50%;margin-top:${Math.round(layout.subSize * 0.5)}px;border-radius:4px}`;
-  } else if (scene.kind === 'custom' && ctx.design) {
-    // A scene Claude designed itself. It arrives sanitised and namespaced (freeform.js);
-    // the palette reaches it as variables so the colour casting still applies.
-    const vars = `--bg:${palette.background};--surface:${palette.surface};--accent:${palette.accent};--text:${palette.text};--on-accent:${inkOn(palette.accent)}`;
-    body += `<div class="${p}cu" style="${vars}">${ctx.design.html}</div>`;
-    // Naming both families here is what gets them embedded for the design to use.
-    css += `\n.${p}cu{position:absolute;left:0;top:0;width:100%;height:100%;color:${palette.text};font-family:'Inter',sans-serif}\n.${p}cuh{font-family:'${look.headFont}',sans-serif}\n${ctx.design.css}`;
   } else if (scene.kind === 'list') {
     // A short headline, then the points tick in one by one.
     const r = layout.solo;

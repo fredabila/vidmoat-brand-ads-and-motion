@@ -155,6 +155,8 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
   const { width: W, height: H } = canvas;
   const palette = storyboard.palette;
   const count = storyboard.scenes.length;
+  const directed = storyboard.directed === true && Boolean(storyboard.direction);
+  const direction = storyboard.direction ?? {};
   const commands = [];
   const timeline = [];
   const push = (cmd) => commands.push(cmd);
@@ -187,12 +189,17 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
     let plate = null;
     let textRegion = null;
     let textAlign = 'center';
-    const showImage = Boolean(image) && (scene.kind === 'hook' || scene.kind === 'feature');
-    const clip = !showImage && scene.footage >= 0 && (scene.kind === 'hook' || scene.kind === 'feature') ? footage[scene.footage] : null;
+    // A scene Claude designed owns its frame when Claude is art director: it says where the
+    // picture goes, paints its own background and gets no brand bar.
+    const designed = Boolean(scene.design);
+    const owned = designed && directed;
+    const mediaBox = owned ? scene.design.mediaBox : null;
+    const showImage = Boolean(image) && (owned ? Boolean(mediaBox) : (scene.kind === 'hook' || scene.kind === 'feature'));
+    const clip = !showImage && scene.footage >= 0 && (owned || scene.kind === 'hook' || scene.kind === 'feature') ? footage[scene.footage] : null;
 
     // Scenes without a picture change colour from one to the next; scenes with one stay on the base palette.
     let themeName = 'base';
-    if (!showImage && !clip && scene.kind !== 'hook' && scene.kind !== 'cta') {
+    if (!showImage && !clip && !owned && scene.kind !== 'hook' && scene.kind !== 'cta') {
       // Not the colour of the scene before, and not the colour the last type-only scene used.
       // A scene Claude designed assumes accent, text and background are three different colours.
       // The accent casting makes two of them the same, so designed scenes never get it.
@@ -205,18 +212,26 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
     lastTheme = themeName;
     const theme = themeFor(palette, themeName);
 
-    if (showImage && scene.kind === 'feature') {
-      const slot = layout.feature[featureIndex % layout.feature.length];
-      featureIndex += 1;
+    if (showImage && (owned || scene.kind === 'feature')) {
+      // The picture's frame: the box the designer asked for, or the template's slot.
+      let slot;
+      if (owned) {
+        const x = Math.min(mediaBox.x, W - 120);
+        const y = Math.min(mediaBox.y, H - 120);
+        slot = { image: { x, y, width: Math.min(mediaBox.width, W - x), height: Math.min(mediaBox.height, H - y) }, text: null, align: 'center' };
+      } else {
+        slot = layout.feature[featureIndex % layout.feature.length];
+        featureIndex += 1;
+      }
       textRegion = slot.text;
       textAlign = slot.align;
       const framed = frameImage(image, slot.image, canvas);
       const at = enter + 0.12;
-      plate = { ...Object.fromEntries(Object.entries(framed.rect).map(([k, v]) => [k, Math.round(v)])), at };
+      if (!owned) plate = { ...Object.fromEntries(Object.entries(framed.rect).map(([k, v]) => [k, Math.round(v)])), at };
       const pos = centre(framed.rect);
       push({
         op: 'addClip', clipId: `${id}_img`, type: 'image', src: image.src, start: round(t), duration: d, trackIndex: tracks.media,
-        patch: { ...pos, scale: framed.scale, cornerRadius: look.radius, cropL: framed.cropX, cropR: framed.cropX, cropT: framed.cropY, cropB: framed.cropY },
+        patch: { ...pos, scale: framed.scale, cornerRadius: owned ? 0 : look.radius, cropL: framed.cropX, cropR: framed.cropX, cropT: framed.cropY, cropB: framed.cropY },
       });
       // Reveal: a mask that opens from the middle of the frame, then a slow push for the rest of the scene.
       const mx = (framed.rect.x + framed.rect.width / 2) / W;
@@ -238,7 +253,7 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
           { time: d, value: round(framed.scale * 1.035), easing: 'linear' },
         ],
       });
-    } else if (showImage) {
+    } else if (showImage && !owned) {
       // Opening shot: the picture fills the frame and drifts under the words.
       const cover = round(Math.max(W / image.width, H / image.height) / Math.min(W / image.width, H / image.height));
       push({ op: 'addClip', clipId: `${id}_img`, type: 'image', src: image.src, start: round(t), duration: d, trackIndex: tracks.media, patch: { scale: cover } });
@@ -277,8 +292,12 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
 
     const shared = { look, lookName, palette: theme, wipePalette: palette, canvas, index: i, brand: storyboard.brandName };
     // A full-bleed opening picture hides the background, so none is laid under it.
-    const back = backLayer(`${id}b-`, { ...shared, plate });
-    if (!(showImage && scene.kind === 'hook') && !clip) push({ op: 'addHtmlElement', clipId: `${id}_back`, name: `Scene ${i + 1} background`, html: back.html, css: back.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.back });
+    const vars = `--bg:${palette.background};--surface:${palette.surface};--accent:${palette.accent};--text:${palette.text};--on-accent:${inkOn(palette.accent)}`;
+    const back = owned
+      // The designer's own background, or the plain brand colour if it gave none.
+      ? { html: `<div class="${id}b-root" style="${vars};background:${scene.design.background || 'var(--bg)'}"></div>`, css: `.${id}b-root{width:100%;height:100%}` }
+      : backLayer(`${id}b-`, { ...shared, plate });
+    if (!(showImage && scene.kind === 'hook' && !owned) && !clip) push({ op: 'addHtmlElement', clipId: `${id}_back`, name: `Scene ${i + 1} background`, html: back.html, css: back.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.back });
 
     // With a logo on the closing card, the words move down to make room for it.
     const ctaLayout = scene.kind === 'cta' && logo
@@ -287,7 +306,10 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
     const front = frontLayer(`${id}f-`, {
       ...shared, scene, layout: ctaLayout, count, duration: d, domain, hasImage: showImage, overMedia: Boolean(clip), textRegion, textAlign,
       soloVariant: soloIndex,
-      design: scene.kind === 'custom' && scene.design ? scopeDesign(scene.design, `${id}f-`) : null,
+      design: designed && (owned || scene.kind === 'custom') ? scopeDesign(scene.design, `${id}f-`) : null,
+      bare: owned,
+      fonts: owned ? [direction.headFont, direction.bodyFont] : [look.headFont],
+      wipeStyle: directed ? direction.transition : null,
     });
     if (!showImage && !clip && scene.kind === 'feature') soloIndex += 1;
     push({ op: 'addHtmlElement', clipId: `${id}_front`, name: `Scene ${i + 1} type`, html: front.html, css: front.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.front });
