@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeStoryboard, heuristicStoryboard, numberInText, fixPalette, contrast, writeStoryboard, buildUserPrompt } from '../server/creative.js';
+import Anthropic from '@anthropic-ai/sdk';
+import { sanitizeStoryboard, heuristicStoryboard, numberInText, fixPalette, contrast, writeStoryboard, buildUserPrompt, buildUserContent } from '../server/creative.js';
 
 const brief = {
   url: 'https://tempo.example.com/one', domain: 'tempo.example.com', siteName: 'Tempo', title: 'Tempo One — the everyday smartwatch',
@@ -67,11 +68,35 @@ test('Claude is asked for structured output and a refusal falls back', async () 
   assert.equal(request.model, 'claude-opus-5-5');
   assert.equal(request.fallbacks, 'default');
   assert.ok(request.output_config.format);
-  assert.match(request.messages[0].content, /<page>[\s\S]*Tempo One[\s\S]*<\/page>/);
+  assert.match(request.messages[0].content[0].text, /<page>[\s\S]*Tempo One[\s\S]*<\/page>/);
   const refused = await writeStoryboard(brief, { length: 'short', client: { beta: { messages: { parse: async () => ({ stop_reason: 'refusal', parsed_output: null }) } } } });
   assert.equal(refused.source, 'fallback');
 });
 
 test('the prompt lists images by number', () => {
   assert.match(buildUserPrompt(brief, { goal: 'ad', sceneCount: 6, format: 'Vertical 9:16' }), /0: watch\n1: wrist/);
+});
+
+test('Claude is shown the pictures, labelled by index, and unreadable ones do not sink the script', async () => {
+  const withPics = { ...brief, images: [
+    { alt: 'watch', src: 'https://api.vidmoat.com/uploads/a.jpg', contentType: 'image/jpeg' },
+    { alt: 'vector', src: 'https://api.vidmoat.com/uploads/b.avif', contentType: 'image/avif' },
+    { alt: 'wrist', src: 'https://api.vidmoat.com/uploads/c.webp', contentType: 'image/webp' },
+  ] };
+  const content = buildUserContent(withPics, { goal: 'ad', sceneCount: 4, format: 'Vertical 9:16' });
+  assert.deepEqual(content.slice(1).map((b) => b.type === 'text' ? b.text : b.source.url), [
+    'Image 0:', 'https://api.vidmoat.com/uploads/a.jpg', 'Image 2:', 'https://api.vidmoat.com/uploads/c.webp',
+  ]);
+
+  const seen = [];
+  const answer = { stop_reason: 'end_turn', parsed_output: { brandName: 'Tempo', tagline: 'x', palette: {}, musicQuery: 'calm', scenes: [scene({ kind: 'hook', image: 2 }), scene({ kind: 'cta' })] } };
+  const client = { beta: { messages: { parse: async (req) => {
+    seen.push(req.messages[0].content.filter((b) => b.type === 'image').length);
+    if (seen.length === 1) throw new Anthropic.BadRequestError(400, { error: { message: 'could not process image' } }, 'could not process image', new Headers());
+    return answer;
+  } } } };
+  const out = await writeStoryboard(withPics, { length: 'short', client });
+  assert.deepEqual(seen, [2, 0]);
+  assert.equal(out.source, 'claude');
+  assert.equal(out.storyboard.scenes[0].image, 2);
 });

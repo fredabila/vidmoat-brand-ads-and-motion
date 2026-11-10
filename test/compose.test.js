@@ -33,7 +33,8 @@ for (const format of Object.keys(FORMATS)) {
       // Two clips never share a track at the same time (the API would move one).
       for (const track of Object.values(tracks)) {
         const onTrack = clips.filter((c) => c.trackIndex === track).sort((a, b) => a.start - b.start);
-        for (let i = 1; i < onTrack.length; i++) assert.ok(onTrack[i].start >= onTrack[i - 1].start + onTrack[i - 1].duration - 0.011, `overlap on track ${track}`);
+        // Strictly: in floating point 8.06 + 4.36 > 12.42, and the API moves a clip that touches the next.
+        for (let i = 1; i < onTrack.length; i++) assert.ok(onTrack[i].start >= onTrack[i - 1].start + onTrack[i - 1].duration, `overlap on track ${track}`);
       }
       // Picture always has a background from the first frame to the last.
       const cover = clips.filter((c) => c.trackIndex === tracks.back || (c.type === 'image' && c.clipId === 's0_img'));
@@ -85,4 +86,25 @@ test('timing and emphasis helpers', () => {
   assert.deepEqual(highlightSpan('Sapphire tough display', 'tough display'), { from: 1, to: 2 });
   assert.equal(highlightSpan('Sapphire tough display', 'missing'), null);
   assert.ok(layoutFor('wide', FORMATS.wide).feature.length === 2);
+});
+
+test('narration stretches a scene to its line and the music ducks under it', () => {
+  const voices = [{ src: 'https://api.vidmoat.com/uploads/v0.mp3', duration: 7.5 }, null, { src: 'https://api.vidmoat.com/uploads/v2.mp3', duration: 1.2 }];
+  const withVoice = compose({ storyboard, images, voices, canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks: { ...tracks, voice: 7 }, music: { src: 'https://api.vidmoat.com/uploads/m.mp3' }, domain: '' });
+  const silent = build('vertical', 'sleek');
+  assert.ok(withVoice.timeline[0].duration >= 7.5 + 0.25 + 0.35 - 0.001, 'scene waits for its line');
+  assert.equal(withVoice.timeline[2].duration, silent.timeline[2].duration, 'a short line does not shorten a scene');
+  const audio = withVoice.commands.filter((c) => c.type === 'audio');
+  assert.deepEqual(audio.map((c) => c.clipId), ['s0_voice', 's2_voice']);
+  assert.ok(audio.every((c) => c.trackIndex === 7));
+  for (const a of audio) {
+    const sc = withVoice.timeline[Number(a.clipId[1])];
+    assert.ok(a.start >= sc.start && a.start + a.duration <= sc.start + sc.duration, 'the line stays inside its scene');
+  }
+  const bed = withVoice.commands.at(-1);
+  assert.equal(bed.duck, true);
+  assert.deepEqual(bed.voiceClipIds, ['s0_voice', 's2_voice']);
+  // Without a voice track (a project made before narration) the lines are left out.
+  const old = compose({ storyboard, images, voices, canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks, music: null, domain: '' });
+  assert.equal(old.commands.filter((c) => c.type === 'audio').length, 0);
 });

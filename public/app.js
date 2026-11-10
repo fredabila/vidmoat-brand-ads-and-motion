@@ -3,9 +3,9 @@
 const $ = (id) => document.getElementById(id);
 const PLAYER_ORIGIN = 'https://www.vidmoat.com';
 const PLAYER_CHANNEL = 'vidmoat.player.v1';
-const ASPECT_ICON = { vertical: [9, 16], square: [13, 13], wide: [18, 10] };
+const ASPECT_ICON = { vertical: [9, 16], portrait: [11, 14], square: [13, 13], wide: [18, 10] };
 const GOAL_LABEL = { ad: 'Ad', brand: 'Brand film', launch: 'Launch' };
-const KIND_LABEL = { hook: 'Hook', feature: 'Point', stat: 'Number', cta: 'Close' };
+const KIND_LABEL = { hook: 'Hook', feature: 'Point', stat: 'Number', list: 'List', quote: 'Quote', cta: 'Close' };
 const SWATCHES = [['background', 'Background'], ['surface', 'Second tone'], ['accent', 'Accent'], ['text', 'Text']];
 
 const state = { video: null, player: null, revision: 0, playing: false, dirty: false, busy: false, renderTimer: null };
@@ -17,24 +17,34 @@ const store = {
 
 // ---------- Options ----------
 
-function chips(host, name, items, selected) {
+const STYLE_DEMO = {
+  punch: 'Stop the <i>scroll</i>',
+  sleek: 'Made to <i>feel</i> premium',
+  playful: 'Say it with <i>joy</i>',
+  editorial: 'The art of <i>less</i>',
+  neon: 'Ship it <i>faster</i>',
+  brutal: 'No <i>fluff</i>',
+};
+
+/** Radio options. `render` returns the visible part of one option. */
+function options(host, name, items, selected, render) {
   host.replaceChildren(...items.map((item) => {
     const label = document.createElement('label');
-    label.className = 'chip';
-    label.title = item.hint ?? '';
+    label.className = 'opt';
     const input = Object.assign(document.createElement('input'), { type: 'radio', name, value: item.id, checked: item.id === selected });
-    const span = document.createElement('span');
-    if (ASPECT_ICON[item.id] && name === 'format') {
-      const icon = document.createElement('i');
-      icon.style.width = `${ASPECT_ICON[item.id][0]}px`;
-      icon.style.height = `${ASPECT_ICON[item.id][1]}px`;
-      span.append(icon);
-    }
-    span.append(item.label);
-    label.append(input, span);
+    label.append(input, render(item));
     return label;
   }));
 }
+const el = (tag, className, html) => Object.assign(document.createElement(tag), { className, innerHTML: html });
+
+const styleCard = (item) => el('span', 'card',
+  `<span class="swatchDemo demo-${item.id}"><b>${STYLE_DEMO[item.id] ?? item.label}</b></span><strong>${item.label}</strong><small>${item.hint ?? ''}</small>`);
+const formatTile = (item) => {
+  const [w, h] = ASPECT_ICON[item.id] ?? [14, 14];
+  return el('span', 'tile', `<i style="width:${w * 2}px;height:${h * 2}px"></i>${item.label.split(' ').pop()}`);
+};
+const segment = (item) => el('span', 'segItem', `${item.label}${item.small ? `<small>${item.small}</small>` : ''}`);
 const picked = (name) => document.querySelector(`input[name="${name}"]:checked`)?.value;
 
 async function loadConfig() {
@@ -45,10 +55,14 @@ async function loadConfig() {
     showFormError('Could not reach the server. Reload the page.');
     return;
   }
-  chips($('formats'), 'format', config.formats, store.get('format') ?? 'vertical');
-  chips($('styles'), 'style', config.styles, store.get('style') ?? 'sleek');
-  chips($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes · ${l.label}` })), store.get('length') ?? 'standard');
-  chips($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad');
+  options($('formats'), 'format', config.formats, store.get('format') ?? 'vertical', formatTile);
+  options($('styles'), 'style', config.styles, store.get('style') ?? 'sleek', styleCard);
+  options($('lengths'), 'length', config.lengths.map((l) => ({ id: l.id, label: `${l.scenes} scenes`, small: l.label })), store.get('length') ?? 'standard', segment);
+  options($('goals'), 'goal', config.goals.map((g) => ({ id: g, label: GOAL_LABEL[g] ?? g })), store.get('goal') ?? 'ad', segment);
+  $('voice').replaceChildren(...(config.voices ?? []).map((v) => Object.assign(document.createElement('option'), { value: v.id, textContent: v.label })));
+  if (store.get('voice')) $('voice').value = store.get('voice');
+  $('voiceover').checked = store.get('voiceover') !== 'off';
+  $('voice').disabled = !$('voiceover').checked;
   $('accessRow').hidden = !config.needsAccessCode;
   $('access').value = store.get('access') ?? '';
   const notes = [];
@@ -99,6 +113,8 @@ async function make(event) {
   showFormError(null);
   for (const name of ['format', 'style', 'length', 'goal']) store.set(name, picked(name));
   store.set('access', $('access').value);
+  store.set('voice', $('voice').value);
+  store.set('voiceover', $('voiceover').checked ? 'on' : 'off');
 
   state.busy = true;
   $('go').disabled = true;
@@ -114,7 +130,7 @@ async function make(event) {
     const res = await fetch('/api/videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Access-Code': $('access').value },
-      body: JSON.stringify({ url, format: picked('format'), style: picked('style'), length: picked('length'), goal: picked('goal'), music: $('music').checked }),
+      body: JSON.stringify({ url, format: picked('format'), style: picked('style'), length: picked('length'), goal: picked('goal'), music: $('music').checked, voiceover: $('voiceover').checked, voice: $('voice').value }),
     });
     if (!res.ok) {
       failure = (await res.json().catch(() => ({}))).error ?? `The server answered ${res.status}.`;
@@ -171,7 +187,8 @@ function showVideo(video, { fresh = false } = {}) {
   $('notices').replaceChildren(...notices.slice(0, 6).map((text) => Object.assign(document.createElement('li'), { textContent: text })));
 
   renderBoard(v);
-  $('musicCredit').textContent = v.music ? `Music: “${v.music.name}”${v.music.credit ? ` by ${v.music.credit}` : ''} (CC0 stock).` : '';
+  const spoken = (v.assets?.voices ?? []).filter(Boolean).length;
+  $('musicCredit').textContent = (spoken ? `Narration: ${spoken} line${spoken === 1 ? '' : 's'}, AI voice. Changing a line re-records it when you apply. ` : '') + (v.music ? `Music: “${v.music.name}”${v.music.credit ? ` by ${v.music.credit}` : ''} (CC0 stock).` : '');
 
   if (fresh) {
     resetRender();
@@ -204,9 +221,11 @@ function renderBoard(v) {
   $('swatches').replaceChildren(...SWATCHES.map(([key, name]) => {
     const label = document.createElement('label');
     label.className = 'swatch';
+    label.title = name;
     const input = Object.assign(document.createElement('input'), { type: 'color', value: sb.palette[key] });
+    input.setAttribute('aria-label', `${name} colour`);
     input.addEventListener('input', () => { sb.palette[key] = input.value; markDirty(); });
-    label.append(input, name);
+    label.append(input);
     return label;
   }));
   $('scenes').replaceChildren(...sb.scenes.map((scene, i) => {
@@ -221,7 +240,10 @@ function renderBoard(v) {
     jump.addEventListener('click', () => jumpTo(i));
     const fields = document.createElement('div');
     fields.className = 'sceneFields';
-    fields.append(field(scene.kind === 'stat' ? 'Label for the number' : 'Headline', scene.headline, (val) => { scene.headline = val; }, { maxLength: 64 }));
+    fields.append(field({ stat: 'Label for the number', quote: 'Quote' }[scene.kind] ?? 'Headline', scene.headline, (val) => { scene.headline = val; }, { maxLength: scene.kind === 'quote' ? 170 : 64 }));
+    if (scene.kind === 'list') {
+      fields.append(field('Points (separate with ;)', (scene.items ?? []).join('; '), (val) => { scene.items = val.split(';').map((t) => t.trim()).filter(Boolean); }, { maxLength: 180 }));
+    }
     const row = document.createElement('div');
     row.className = 'sceneRow';
     if (scene.kind === 'stat') {
@@ -236,11 +258,14 @@ function renderBoard(v) {
       );
     } else {
       row.append(
-        field('Supporting line', scene.sub, (val) => { scene.sub = val; }, { maxLength: 96 }),
+        field(scene.kind === 'quote' ? 'Who said it' : 'Supporting line', scene.sub, (val) => { scene.sub = val; }, { maxLength: 96 }),
         field('Coloured words', scene.highlight, (val) => { scene.highlight = val; }, { maxLength: 40 }),
       );
     }
     fields.append(row);
+    if (v.assets?.voiceId) {
+      fields.append(field('Narration', scene.voice, (val) => { scene.voice = val; }, { maxLength: 220 }));
+    }
     li.append(jump, fields);
     return li;
   }));
@@ -449,6 +474,7 @@ async function render() {
 // ---------- Wiring ----------
 
 $('make').addEventListener('submit', make);
+$('voiceover').addEventListener('change', () => { $('voice').disabled = !$('voiceover').checked; });
 $('apply').addEventListener('click', applyChanges);
 $('brandName').addEventListener('input', markDirty);
 $('playBtn').addEventListener('click', togglePlay);

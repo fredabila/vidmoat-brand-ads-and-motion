@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createVidmoat, VidmoatError } from './vidmoat.js';
-import { buildVideo, rebuildVideo } from './pipeline.js';
+import { buildVideo, rebuildVideo, VOICES } from './pipeline.js';
 import { LinkError } from './scrape.js';
 import { claudeConfigured, LENGTHS, GOALS } from './creative.js';
 import { FORMATS, STYLES } from './compose.js';
@@ -42,6 +42,7 @@ export function createApp({ env = process.env, vidmoat, anthropic, log = console
   const signer = createSigner(env.APP_SECRET || env.VIDMOAT_KEY || crypto.randomBytes(32).toString('hex'));
   const createLimit = createRateLimiter({ limit: Number(env.VIDEOS_PER_HOUR) || 6, windowMs: 3_600_000 });
   const renderLimit = createRateLimiter({ limit: Number(env.RENDERS_PER_HOUR) || 6, windowMs: 3_600_000 });
+  const rebuildLimit = createRateLimiter({ limit: Number(env.REBUILDS_PER_HOUR) || 30, windowMs: 3_600_000 }); // a rebuild can re-record narration
   const frameLimit = createRateLimiter({ limit: 8, windowMs: 60_000 }); // Vidmoat allows 10 frames a minute per key
   const accessCode = env.ACCESS_CODE || '';
 
@@ -71,6 +72,7 @@ export function createApp({ env = process.env, vidmoat, anthropic, log = console
       ready: configured,
       claude: Boolean(anthropic) || claudeConfigured(env),
       needsAccessCode: Boolean(accessCode),
+      voices: Object.entries(VOICES).map(([id, label]) => ({ id, label })),
       formats: Object.entries(FORMATS).map(([id, f]) => ({ id, label: f.label, hint: f.hint })),
       styles: Object.entries(STYLES).map(([id, s]) => ({ id, label: s.label, hint: s.hint })),
       lengths: Object.entries(LENGTHS).map(([id, l]) => ({ id, label: l.label, scenes: l.scenes })),
@@ -92,7 +94,7 @@ export function createApp({ env = process.env, vidmoat, anthropic, log = console
     const send = (obj) => { if (!res.writableEnded) res.write(`${JSON.stringify(obj)}\n`); };
     try {
       const video = await buildVideo(
-        { url, format: req.body.format, style: req.body.style, length: req.body.length, goal: req.body.goal, music: req.body.music !== false },
+        { url, format: req.body.format, style: req.body.style, length: req.body.length, goal: req.body.goal, music: req.body.music !== false, voiceover: req.body.voiceover !== false, voice: req.body.voice },
         { vidmoat: api, anthropic, emit: (step, status, detail) => send({ type: 'step', step, status, detail }), log },
       );
       send({ type: 'done', video: { ...video, token: signer.sign(video.projectId) } });
@@ -106,8 +108,9 @@ export function createApp({ env = process.env, vidmoat, anthropic, log = console
 
   // Apply hand edits to the storyboard and lay the timeline out again.
   app.post('/api/videos/:id/rebuild', requireApi, requireToken, async (req, res) => {
+    if (!rebuildLimit.take(req.ip).ok) return res.status(429).json({ error: 'That is a lot of changes. Try again in a while.' });
     try {
-      const video = await rebuildVideo({ ...req.body, projectId: req.params.id }, { vidmoat: api });
+      const video = await rebuildVideo({ ...req.body, projectId: req.params.id }, { vidmoat: api, log });
       res.json({ video: { ...video, token: signer.sign(video.projectId) } });
     } catch (err) { fail(res, err); }
   });

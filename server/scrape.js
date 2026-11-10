@@ -273,6 +273,10 @@ export function extractBrief(html, pageUrl) {
   const buttons = uniq(texts('a[class*="btn"], a[class*="button"], a[class*="cta"], button')
     .filter((t) => { const c = clean(t); return c.length < 28 && !FURNITURE.test(c); }), 6, 28);
 
+  // What customers said, where the page marks it up as such.
+  const quotes = uniq(texts('blockquote, [class*="testimonial"] p, [class*="review"] p, [class*="quote"] p, q')
+    .filter((t) => { const c = clean(t); return c.length > 24 && c.length < 240; }), 4, 240);
+
   const offer = [].concat(product?.offers ?? [])[0];
   const facts = {};
   if (product?.name) facts.productName = clean(product.name);
@@ -294,6 +298,7 @@ export function extractBrief(html, pageUrl) {
     headings,
     paragraphs,
     bullets,
+    quotes,
     buttons,
     facts,
     images,
@@ -304,7 +309,7 @@ export function extractBrief(html, pageUrl) {
 /** Everything the page says, flattened. Used to check claims against the source. */
 export function briefText(brief) {
   return [brief.siteName, brief.title, brief.description, ...brief.headings, ...brief.paragraphs,
-    ...brief.bullets, ...Object.values(brief.facts ?? {})].join(' \n ');
+    ...brief.bullets, ...(brief.quotes ?? []), ...Object.values(brief.facts ?? {})].join(' \n ');
 }
 
 export async function readLink(input, deps) {

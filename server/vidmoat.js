@@ -103,6 +103,13 @@ export function createVidmoat({ apiKey, baseUrl = BASE_URL, fetchImpl = fetch } 
     importMedia: (url) =>
       request('POST', '/media/import', { body: { url }, timeoutMs: 130_000 }),
 
+    /** Text to speech. Spends credits: 15 a call with OpenAI, up to 1,000 characters. */
+    createSpeech: (text, { voiceId, instructions } = {}) =>
+      request('POST', '/ai/speech', {
+        body: { text, provider: 'openai', ...(voiceId ? { voiceId } : {}), ...(instructions ? { instructions } : {}), maxCredits: 15 },
+        timeoutMs: 120_000,
+      }),
+
     searchStock: (query, type = 'video', limit = 12) =>
       request('GET', '/stock/search', { query: { query, type, limit } }),
 

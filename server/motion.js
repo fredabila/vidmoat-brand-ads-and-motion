@@ -56,6 +56,18 @@ export const LOOKS = {
     headFont: 'Titan One', headWeight: 400, uppercase: false, charWidth: 0.6, lineHeight: 1.08, tracking: '0', sizeBoost: 0.92,
     reveal: 'pop', stagger: 0.07, revealTime: 0.6, highlight: 'pill', wipe: 'iris', radius: 48,
   },
+  editorial: {
+    headFont: 'Playfair Display', headWeight: 700, uppercase: false, charWidth: 0.5, lineHeight: 1.06, tracking: '-0.02em', sizeBoost: 1.02,
+    reveal: 'soft', stagger: 0.09, revealTime: 0.9, highlight: 'italic', wipe: 'curtain', radius: 4,
+  },
+  neon: {
+    headFont: 'Space Grotesk', headWeight: 700, uppercase: false, charWidth: 0.56, lineHeight: 1.02, tracking: '-0.045em', sizeBoost: 1.02,
+    reveal: 'rise', stagger: 0.05, revealTime: 0.55, highlight: 'glow', wipe: 'blinds', radius: 22,
+  },
+  brutal: {
+    headFont: 'Archivo Black', headWeight: 400, uppercase: true, charWidth: 0.63, lineHeight: 1, tracking: '-0.02em', sizeBoost: 0.96,
+    reveal: 'pop', stagger: 0.06, revealTime: 0.45, highlight: 'box', wipe: 'blinds', radius: 0,
+  },
 };
 
 const BODY = "'Inter',sans-serif";
@@ -120,9 +132,12 @@ function kineticWords(p, text, { at, look, palette, highlight }) {
     if (!lit) return `<span class="${p}w"><span class="${p}m"><span class="${p}i" style="${move}">${esc(word)}</span></span></span>`;
     // The emphasis lands after its own word has, so the eye sees it happen.
     const sweep = easeOut(prog(at + i * look.stagger + look.revealTime * 0.55, 0.5));
-    const colour = look.highlight === 'underline' ? palette.accent : ink;
-    return `<span class="${p}w"><span class="${p}h ${p}h-${look.highlight}" style="transform:scaleX(calc(${sweep}))"></span>` +
-      `<span class="${p}m"><span class="${p}i" style="${move};color:${colour}">${esc(word)}</span></span></span>`;
+    // Solid blocks need ink that reads on the accent; every other emphasis colours the word itself.
+    const solid = look.highlight === 'block' || look.highlight === 'pill';
+    const colour = solid ? ink : look.highlight === 'box' ? palette.text : palette.accent;
+    const extra = look.highlight === 'italic' ? ';font-style:italic' : look.highlight === 'glow' ? `;text-shadow:0 0 0.35em ${rgba(palette.accent, 0.75)}` : '';
+    const mark = look.highlight === 'italic' || look.highlight === 'glow' ? '' : `<span class="${p}h ${p}h-${look.highlight}" style="transform:scaleX(calc(${sweep}))"></span>`;
+    return `<span class="${p}w">${mark}<span class="${p}m"><span class="${p}i" style="${move};color:${colour}${extra}">${esc(word)}</span></span></span>`;
   }).join('');
 }
 
@@ -138,6 +153,7 @@ function typeCss(p, look, palette) {
 .${p}h-block{left:-0.1em;right:-0.1em;top:0.02em;bottom:0.02em}
 .${p}h-pill{left:-0.16em;right:-0.16em;top:0;bottom:-0.02em;border-radius:0.32em;rotate:-1.5deg}
 .${p}h-underline{left:0;right:0;bottom:-0.02em;height:0.085em;border-radius:0.05em}
+.${p}h-box{left:-0.12em;right:-0.12em;top:0.02em;bottom:0;background:transparent;border:0.07em solid ${palette.accent}}
 .${p}sb{font-family:${BODY};font-weight:500;line-height:1.28;letter-spacing:-0.01em;color:${rgba(palette.text, 0.86)};margin:0}`;
 }
 
@@ -174,7 +190,19 @@ function wipes(p, { look, palette, duration, vertical, enter, exit, reach }) {
   const axis = vertical ? 'Y' : 'X';
   const second = luminance(palette.background) < 0.4 ? palette.text : palette.surface;
   const panel = (cls, colour, transform) => `<div class="${p}wp ${p}${cls}" style="background:${colour};${transform}"></div>`;
-  if (look.wipe === 'iris') {
+  if (look.wipe === 'blinds') {
+    // Six bands that shut one after another, then open the same way.
+    const N = 6;
+    for (let k = 0; k < N; k++) {
+      const colour = k % 2 ? second : palette.accent;
+      const band = vertical
+        ? `left:0;width:100%;top:${num((k * 100) / N)}%;height:${num(100 / N + 0.2)}%`
+        : `top:0;height:100%;left:${num((k * 100) / N)}%;width:${num(100 / N + 0.2)}%`;
+      const scale = vertical ? 'scaleX' : 'scaleY';
+      if (exit) parts.push(`<div class="${p}bd" style="${band};background:${colour};transform-origin:${vertical ? '0 50%' : '50% 0'};transform:${scale}(calc(${easeIn(prog(duration - OUT + k * 0.025, OUT - 0.14), 2)}))"></div>`);
+      if (enter) parts.push(`<div class="${p}bd" style="${band};background:${colour};transform-origin:${vertical ? '100% 50%' : '50% 100%'};transform:${scale}(calc(1 - ${easeOut(prog(0.04 + k * 0.03, IN - 0.14), 3)}))"></div>`);
+    }
+  } else if (look.wipe === 'iris') {
     // A circle that swallows the frame, then lets go of it.
     if (exit) parts.push(`<div class="${p}ir" style="background:${palette.accent};transform:translate(-50%,-50%) scale(calc(${easeIn(prog(duration - OUT, OUT), 2)} * 2.6))"></div>`);
     if (enter) parts.push(`<div class="${p}ir" style="background:${palette.accent};transform:translate(-50%,-50%) scale(calc((1 - ${easeOut(prog(0, IN + 0.1), 3)}) * 2.6))"></div>`);
@@ -191,6 +219,7 @@ function wipes(p, { look, palette, duration, vertical, enter, exit, reach }) {
   }
   const css = `
 .${p}wp{position:absolute;left:-15%;top:-15%;width:130%;height:130%}
+.${p}bd{position:absolute}
 .${p}ir{position:absolute;left:50%;top:50%;width:${reach}px;height:${reach}px;border-radius:50%}`;
   return { html: parts.join(''), css, enterTime: enter ? IN : 0 };
 }
@@ -225,6 +254,39 @@ export function backLayer(p, { look, lookName, palette, canvas, index, brand, pl
 .${p}dots{position:absolute;inset:0;background-image:radial-gradient(${rgba(palette.text, 0.1)} 3px,transparent 4px);background-size:54px 54px;transform:translate(calc(var(--vm-p) * -27px),calc(var(--vm-p) * -27px))}
 .${p}st{position:absolute;width:${s}px;height:${s}px;opacity:0.9}
 .${p}rg{position:absolute;width:${s}px;height:${s}px;border-radius:50%;border:${Math.round(s * 0.12)}px solid ${rgba(palette.accent, 0.55)};box-sizing:border-box}`;
+  } else if (lookName === 'editorial') {
+    // A hairline circle breathing, a rule, and a folio number: a magazine page.
+    const s = Math.round(Math.min(W, H) * 0.92);
+    decor += `<div class="${p}ring" style="${flip === 1 ? 'right' : 'left'}:${Math.round(-s * 0.32)}px;top:${Math.round(H * 0.5 - s * 0.5)}px;transform:scale(calc(0.86 + ${easeOut(prog(0, 1.4))} * 0.14 + var(--vm-p) * 0.05))"></div>`;
+    decor += `<div class="${p}hair" style="transform:scaleY(calc(${easeOut(prog(0.2, 1))}))"></div>`;
+    decor += `<div class="${p}folio" style="opacity:${prog(0.5, 0.6)}">N&deg; ${String(index + 1).padStart(2, '0')}</div>`;
+    css += `
+.${p}ring{position:absolute;width:${s}px;height:${s}px;border-radius:50%;border:1.5px solid ${rgba(palette.text, 0.22)};box-sizing:border-box}
+.${p}hair{position:absolute;${flip === 1 ? 'left' : 'right'}:${Math.round(Math.min(W, H) * 0.045)}px;top:8%;height:84%;width:1.5px;background:${rgba(palette.text, 0.28)};transform-origin:50% 0}
+.${p}folio{position:absolute;right:${Math.round(Math.min(W, H) * 0.08)}px;bottom:${Math.round(Math.min(W, H) * 0.07)}px;font-family:'Playfair Display',serif;font-style:italic;font-weight:400;font-size:${Math.round(Math.min(W, H) * 0.034)}px;color:${rgba(palette.text, 0.6)}}`;
+  } else if (lookName === 'neon') {
+    // Two lights, scanlines, and a streak that crosses the frame once.
+    const s = Math.round(Math.max(W, H) * 0.8);
+    decor += `<div class="${p}gl" style="${flip === 1 ? 'left' : 'right'}:${Math.round(-s * 0.4)}px;top:${Math.round(-s * 0.3)}px;background:radial-gradient(circle,${rgba(palette.accent, 0.6)} 0%,${rgba(palette.accent, 0)} 60%);transform:translate(calc(var(--vm-p) * ${flip * 120}px),calc(var(--vm-p) * 80px))"></div>`;
+    decor += `<div class="${p}gl" style="${flip === 1 ? 'right' : 'left'}:${Math.round(-s * 0.5)}px;bottom:${Math.round(-s * 0.5)}px;background:radial-gradient(circle,${rgba(palette.text, 0.22)} 0%,${rgba(palette.text, 0)} 60%);transform:translate(calc(var(--vm-p) * ${flip * -90}px),calc(var(--vm-p) * -60px))"></div>`;
+    decor += `<div class="${p}scan"></div>`;
+    decor += `<div class="${p}streak" style="transform:translateX(calc(${easeOut(prog(0.1, 1.6), 2)} * ${Math.round(W * 2.4)}px - ${Math.round(W * 0.7)}px)) rotate(-24deg)"></div>`;
+    css += `
+.${p}gl{position:absolute;width:${s}px;height:${s}px;border-radius:50%}
+.${p}scan{position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,${rgba(palette.text, 0.05)} 0 1px,transparent 1px 5px)}
+.${p}streak{position:absolute;left:0;top:-30%;width:${Math.round(W * 0.16)}px;height:160%;background:linear-gradient(90deg,${rgba(palette.accent, 0)},${rgba(palette.accent, 0.35)},${rgba(palette.accent, 0)})}`;
+  } else if (lookName === 'brutal') {
+    // A hard frame, a hazard band that crawls, and one heavy disc.
+    const b = Math.round(Math.min(W, H) * 0.012);
+    const s = Math.round(Math.min(W, H) * 0.5);
+    // Kept to the right edge, mostly out of frame, so it never sits under the words.
+    decor += `<div class="${p}disc" style="right:${Math.round(-s * 0.62)}px;top:${Math.round(H * (flip === 1 ? 0.08 : 0.7))}px;transform:scale(calc(${backOut(prog(0.05, 0.6))})) translateY(calc(var(--vm-p) * ${flip * 50}px))"></div>`;
+    decor += `<div class="${p}haz" style="background-position:calc(var(--vm-t) * 46px) 0"></div>`;
+    decor += `<div class="${p}frm"></div>`;
+    css += `
+.${p}disc{position:absolute;width:${s}px;height:${s}px;border-radius:50%;background:${palette.accent};border:${b}px solid ${palette.text};box-sizing:border-box}
+.${p}haz{position:absolute;left:0;right:0;bottom:${b * 3}px;height:${Math.round(Math.min(W, H) * 0.045)}px;background-image:repeating-linear-gradient(-45deg,${palette.text} 0 22px,${palette.accent} 22px 44px);background-size:62.23px 100%}
+.${p}frm{position:absolute;inset:${b * 2}px;border:${b}px solid ${palette.text}}`;
   } else {
     // Soft light moving slowly across a fine grid.
     const s = Math.round(Math.max(W, H) * 0.9);
@@ -239,9 +301,17 @@ export function backLayer(p, { look, lookName, palette, canvas, index, brand, pl
   if (plate) {
     // What the picture sits on: a hard offset block, or a soft shadow.
     const open = easeOut(prog(plate.at, 0.7));
-    if (lookName === 'sleek') {
+    if (lookName === 'sleek' || lookName === 'neon') {
+      const glow = lookName === 'neon' ? `0 0 110px ${rgba(palette.accent, 0.6)},0 0 0 2px ${rgba(palette.accent, 0.8)}` : `0 50px 120px ${rgba('#000000', 0.5)},0 0 0 1px ${rgba(palette.text, 0.12)}`;
       decor += `<div class="${p}pl" style="left:${plate.x}px;top:${plate.y}px;width:${plate.width}px;height:${plate.height}px;opacity:calc(${open})"></div>`;
-      css += `\n.${p}pl{position:absolute;border-radius:${look.radius}px;box-shadow:0 50px 120px ${rgba('#000000', 0.5)},0 0 0 1px ${rgba(palette.text, 0.12)}}`;
+      css += `\n.${p}pl{position:absolute;border-radius:${look.radius}px;box-shadow:${glow}}`;
+    } else if (lookName === 'editorial') {
+      // A hairline frame set off from the picture, like a mount.
+      decor += `<div class="${p}pl" style="left:${plate.x - 18}px;top:${plate.y - 18}px;width:${plate.width + 36}px;height:${plate.height + 36}px;opacity:calc(${open})"></div>`;
+      css += `\n.${p}pl{position:absolute;border:1.5px solid ${rgba(palette.text, 0.5)};box-sizing:border-box}`;
+    } else if (lookName === 'brutal') {
+      decor += `<div class="${p}pl" style="left:${plate.x + 22 * flip}px;top:${plate.y + 22}px;width:${plate.width}px;height:${plate.height}px;transform:scale(calc(${open}))"></div>`;
+      css += `\n.${p}pl{position:absolute;background:${palette.text};transform-origin:50% 50%}`;
     } else {
       const off = lookName === 'punch' ? 20 : 16;
       decor += `<div class="${p}pl" style="left:${plate.x + off * flip}px;top:${plate.y + off}px;width:${plate.width}px;height:${plate.height}px;transform:scale(calc(${open}))"></div>`;
@@ -259,13 +329,16 @@ function box(cls, r, extra = '') {
 
 /** Headline plus supporting line inside a region, aligned start, center or end. */
 function textRegion(p, scene, region, { look, palette, at, base, subSize, align = 'center', centred = false }) {
+  region = { ...region, x: Math.round(region.x), y: Math.round(region.y), width: Math.round(region.width), height: Math.round(region.height) };
   const subHeight = scene.sub ? estimateText(scene.sub, subSize, region.width, 0.5, 1.28).height + subSize * 0.7 : 0;
   const size = fitFont(scene.headline, base, { width: region.width, height: Math.max(region.height - subHeight, 80) }, look);
   const words = kineticWords(p, scene.headline, { at, look, palette, highlight: scene.highlight });
   const tokens = scene.headline.split(/\s+/).filter(Boolean).length;
   const subAt = at + tokens * look.stagger + look.revealTime * 0.6;
   const justify = { start: 'flex-start', center: 'center', end: 'flex-end' }[align];
-  return box(`${p}tx`, region, `justify-content:${justify};${centred ? 'align-items:center;text-align:center;' : ''}`) +
+  // The whole block keeps drifting forward a little, so nothing ever sits dead still.
+  const drift = `transform:scale(calc(1 + var(--vm-p) * 0.03));transform-origin:${centred ? '50%' : '0'} 60%;`;
+  return box(`${p}tx`, region, `justify-content:${justify};${centred ? 'align-items:center;text-align:center;' : ''}${drift}`) +
     `<div class="${p}hd" style="font-size:${size}px">${words}</div>` +
     (scene.sub ? `<div class="${p}sb" style="font-size:${subSize}px;margin-top:${Math.round(subSize * 0.7)}px;${subStyle(subAt)}">${esc(scene.sub)}</div>` : '') +
     '</div>';
@@ -300,9 +373,10 @@ function odometer(p, scene, { at, palette, size }) {
  */
 export function frontLayer(p, ctx) {
   const { scene, look, lookName, palette, canvas, layout, index, count, brand, duration, domain, hasImage } = ctx;
+  const overMedia = Boolean(ctx.overMedia);
   const { width: W, height: H } = canvas;
   const vertical = W <= H;
-  const wipe = wipes(p, { look, palette, duration, vertical, enter: index > 0, exit: index < count - 1, reach: Math.max(W, H) });
+  const wipe = wipes(p, { look, palette: ctx.wipePalette ?? palette, duration, vertical, enter: index > 0, exit: index < count - 1, reach: Math.max(W, H) });
   const at = wipe.enterTime + 0.08; // type starts as the panels clear
   const bar = topBar(p, { brand, index, count, palette, frame: layout.frame });
   let body = '';
@@ -311,13 +385,18 @@ export function frontLayer(p, ctx) {
 .${p}tx{position:absolute;display:flex;flex-direction:column}` + typeCss(p, look, palette) + bar.css + wipe.css;
   const common = { look, palette, at, subSize: layout.subSize };
 
-  if (scene.kind === 'hook') {
-    if (hasImage) {
+  if (scene.kind === 'hook' || overMedia) {
+    if (hasImage || overMedia) {
       // A scrim that is heaviest where the words sit.
       body += `<div class="${p}scrim"></div>`;
       css += `\n.${p}scrim{position:absolute;inset:0;background:linear-gradient(${vertical ? '180deg' : '270deg'},${rgba(palette.background, 0.62)} 0%,${rgba(palette.background, 0.78)} 45%,${rgba(palette.background, 0.96)} 100%)}`;
     }
-    body += textRegion(p, scene, layout.hook, { ...common, base: layout.heroSize, align: hasImage && vertical ? 'end' : 'center' });
+    if (overMedia) {
+      const inset = Math.round(Math.min(W, H) * 0.04);
+      body += `<div class="${p}vf" style="inset:${inset}px;clip-path:inset(0 calc((1 - ${easeOut(prog(at, 1))}) * 100%) 0 0)"></div>`;
+      css += `\n.${p}vf{position:absolute;border:2px solid ${rgba(palette.text, 0.42)};border-radius:${Math.min(look.radius, 28)}px}`;
+    }
+    body += textRegion(p, scene, layout.hook, { ...common, base: scene.kind === 'hook' ? layout.heroSize : layout.soloSize, align: (hasImage || overMedia) && vertical ? 'end' : 'center' });
   } else if (scene.kind === 'stat') {
     const r = layout.stat;
     const odo = odometer(p, scene, { at: at + 0.1, palette, size: fitFont(Math.round(scene.statValue).toLocaleString('en-US') + scene.statPrefix + scene.statSuffix, layout.statSize, { width: r.width, height: 9999 }, { ...LOOKS.punch, sizeBoost: 1, charWidth: 0.5 }) });
@@ -328,6 +407,43 @@ export function frontLayer(p, ctx) {
       (scene.sub ? `<div class="${p}sb" style="font-size:${layout.subSize}px;margin-top:${Math.round(layout.subSize * 0.6)}px;${subStyle(at + 1.3)}">${esc(scene.sub)}</div>` : '') +
       '</div>';
     css += odo.css + `\n.${p}rule{height:8px;width:${Math.round(r.width * 0.42)}px;background:${palette.text};transform-origin:0 50%;margin-top:${Math.round(layout.subSize * 0.5)}px;border-radius:4px}`;
+  } else if (scene.kind === 'list') {
+    // A short headline, then the points tick in one by one.
+    const r = layout.solo;
+    const items = scene.items ?? [];
+    const itemSize = Math.round(layout.subSize * 1.45);
+    const headSize = fitFont(scene.headline, layout.headSize, { width: r.width, height: r.height * 0.3 }, look, 3);
+    const first = at + 0.55;
+    const rows = items.map((item, k) => {
+      const x = prog(first + k * 0.32, 0.55);
+      return `<div class="${p}li" style="opacity:${prog(first + k * 0.32, 0.2)};transform:translateX(calc((1 - ${easeOut(x)}) * -70px))">` +
+        `<span class="${p}ck" style="transform:scale(calc(${backOut(prog(first + k * 0.32 + 0.12, 0.45))}))"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="${inkOn(palette.accent)}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>` +
+        `<span>${esc(item)}</span></div>`;
+    }).join('');
+    body += box(`${p}tx`, r, `justify-content:center;transform:scale(calc(1 + var(--vm-p) * 0.025));transform-origin:0 60%;`) +
+      `<div class="${p}hd" style="font-size:${headSize}px">${kineticWords(p, scene.headline, { at, look, palette, highlight: scene.highlight })}</div>` +
+      `<div class="${p}ls">${rows}</div></div>`;
+    css += `
+.${p}ls{display:flex;flex-direction:column;gap:${Math.round(itemSize * 0.62)}px;margin-top:${Math.round(itemSize * 1.2)}px}
+.${p}li{display:flex;align-items:center;gap:${Math.round(itemSize * 0.5)}px;font-family:${BODY};font-weight:600;font-size:${itemSize}px;line-height:1.2;letter-spacing:-0.015em;color:${palette.text}}
+.${p}ck{flex:none;display:grid;place-items:center;width:${Math.round(itemSize * 1.15)}px;height:${Math.round(itemSize * 1.15)}px;border-radius:${look.radius === 0 ? 0 : 999}px;background:${palette.accent}}
+.${p}ck svg{width:62%;height:62%}`;
+  } else if (scene.kind === 'quote') {
+    // Somebody else's words: a big quotation mark, the line, a rule, who said it.
+    const r = layout.solo;
+    const markSize = Math.round(Math.min(W, H) * 0.3);
+    const size = fitFont(scene.headline, layout.headSize * 0.8, { width: r.width, height: r.height * 0.5 }, look, 6);
+    const tokens = scene.headline.split(/\s+/).filter(Boolean).length;
+    const after = at + 0.25 + tokens * look.stagger + look.revealTime * 0.5;
+    body += box(`${p}tx`, r, `justify-content:center;transform:scale(calc(1 + var(--vm-p) * 0.025));transform-origin:0 60%;`) +
+      `<div class="${p}qm" style="font-size:${markSize}px;transform:scale(calc(${backOut(prog(at, 0.6))}));opacity:${prog(at, 0.15)}">&ldquo;</div>` +
+      `<div class="${p}hd" style="font-size:${size}px;line-height:${Math.max(look.lineHeight, 1.12)}">${kineticWords(p, scene.headline, { at: at + 0.25, look, palette, highlight: scene.highlight })}</div>` +
+      `<div class="${p}qr" style="transform:scaleX(calc(${easeOut(prog(after, 0.6))}))"></div>` +
+      (scene.sub ? `<div class="${p}sb" style="font-size:${layout.subSize}px;font-weight:600;${subStyle(after + 0.15)}">${esc(scene.sub)}</div>` : '') +
+      '</div>';
+    css += `
+.${p}qm{font-family:'Playfair Display',serif;font-weight:900;line-height:0.7;height:0.42em;color:${palette.accent};transform-origin:0 100%}
+.${p}qr{width:${Math.round(r.width * 0.2)}px;height:6px;border-radius:3px;background:${palette.accent};transform-origin:0 50%;margin:${Math.round(layout.subSize * 0.9)}px 0 ${Math.round(layout.subSize * 0.55)}px}`;
   } else if (scene.kind === 'cta') {
     const r = layout.cta;
     const ink = inkOn(palette.accent);
@@ -353,7 +469,35 @@ export function frontLayer(p, ctx) {
   } else if (hasImage) {
     body += textRegion(p, scene, ctx.textRegion, { ...common, base: layout.headSize, align: ctx.textAlign });
   } else {
-    body += textRegion(p, scene, layout.solo, { ...common, base: layout.soloSize, align: 'center' });
+    // Type-only scenes take turns between four compositions so no two in a row look alike.
+    const variant = (ctx.soloVariant ?? 0) % 4;
+    const r = layout.solo;
+    if (variant === 1) {
+      // A giant outlined scene number above a headline that sits low in the frame.
+      const numSize = Math.round(Math.min(W, H) * 0.42);
+      const rise = easeOut(prog(at, 0.9));
+      body += `<div class="${p}ix" style="left:${r.x}px;top:${Math.round(r.y - numSize * 0.08)}px;font-size:${numSize}px;transform:translateY(calc((1 - ${rise}) * 60px));opacity:calc(${rise})">${String(index).padStart(2, '0')}</div>`;
+      css += `\n.${p}ix{position:absolute;font-family:'Anton',sans-serif;font-weight:400;line-height:1;color:transparent;-webkit-text-stroke:3px ${palette.accent}}`;
+      body += textRegion(p, scene, { ...r, y: r.y + r.height * 0.4, height: r.height * 0.6 }, { ...common, at: at + 0.15, base: layout.soloSize * 0.86, align: 'end' });
+    } else if (variant === 2) {
+      // Everything centred, the supporting line in a pill.
+      body += textRegion(p, { ...scene, sub: '' }, { ...r, height: r.height * 0.62 }, { ...common, base: layout.soloSize, align: 'end', centred: true });
+      if (scene.sub) {
+        const pillAt = at + 0.7;
+        body += box(`${p}tx`, { ...r, y: r.y + r.height * 0.62 + 44, height: r.height * 0.3 }, 'align-items:center;') +
+          `<div class="${p}pill" style="transform:scale(calc(${backOut(prog(pillAt, 0.55))}));opacity:${prog(pillAt, 0.15)}">${esc(scene.sub)}</div></div>`;
+        css += `\n.${p}pill{font-family:${BODY};font-weight:600;font-size:${Math.round(layout.subSize * 0.92)}px;line-height:1.25;text-align:center;color:${inkOn(palette.accent)};background:${palette.accent};padding:0.5em 1em;border-radius:1.4em;max-width:92%}`;
+      }
+    } else if (variant === 3) {
+      // A thick rule draws across, and the headline hangs from it at the bottom.
+      const rule = easeOut(prog(at, 0.8));
+      const y = r.y + r.height * 0.46;
+      body += `<div class="${p}rl" style="left:${r.x}px;top:${Math.round(y)}px;width:${r.width}px;transform:scaleX(calc(${rule}))"></div>`;
+      css += `\n.${p}rl{position:absolute;height:10px;background:${palette.accent};transform-origin:0 50%;border-radius:5px}`;
+      body += textRegion(p, scene, { ...r, y: y + 54, height: r.y + r.height - y - 54 }, { ...common, at: at + 0.2, base: layout.soloSize * 0.9, align: 'start' });
+    } else {
+      body += textRegion(p, scene, r, { ...common, base: layout.soloSize, align: 'center' });
+    }
   }
 
   return { html: `<div class="${p}root">${body}${bar.html}${wipe.html}</div>`, css, typeAt: at };

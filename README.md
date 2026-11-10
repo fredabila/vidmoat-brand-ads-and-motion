@@ -36,7 +36,9 @@ talks to this app's own `/api`.
 | Vidmoat **live** key | Real MP4 renders, billed to your export allowance. Needs Studio, Team or Enterprise and an approved app. |
 | No Anthropic key | Still works: the script is assembled from the page's headings instead of written. |
 
-Deploy it anywhere that runs a long-lived Node 20+ process (Render, Railway, Fly, a VPS).
+Deploy it anywhere that runs Node 20+ (Render, Railway, Fly, a VPS), or on Vercel: `api/index.js`
+and `vercel.json` run the same app as one function, with `VIDMOAT_KEY`, `ANTHROPIC_API_KEY` and
+`APP_SECRET` set as project environment variables.
 The app keeps no database: every video is a project on your Vidmoat account.
 
 ## How a video is made
@@ -53,7 +55,7 @@ link ─▶ scrape.js ─▶ pipeline.js ─▶ creative.js ─▶ compose.js + 
 2. **Collect** (`server/pipeline.js`). Pictures go into the Vidmoat library with
    `POST /v1/media/import` and are measured; tiny ones, banners and slivers are dropped.
 3. **Write** (`server/creative.js`). Claude returns a storyboard as structured output:
-   brand, palette, and scenes (`hook`, `feature`, `stat`, `cta`). It is then sanitised in
+   brand, palette, and scenes (`hook`, `feature`, `stat`, `list`, `quote`, `cta`). It is then sanitised in
    code: lengths clamped, colours repaired for contrast, and any counter whose number is
    not on the page is demoted, so the model cannot put an invented statistic in an ad.
 4. **Compose** (`server/compose.js`, `server/motion.js`). The storyboard becomes Vidmoat
@@ -68,10 +70,16 @@ link ─▶ scrape.js ─▶ pipeline.js ─▶ creative.js ─▶ compose.js + 
 7. **Render**. `POST /v1/renders`, then a five-second poll. A render already running for
    the project is picked up rather than queued twice.
 
-Three art directions (`LOOKS` in `server/motion.js`): **Punch** (condensed type from
-behind masks, highlight blocks, slab wipes), **Sleek** (soft light on a fine grid,
-blur-in type, drawn underlines) and **Playful** (round type that pops, pills, an iris
-wipe). Three canvases: 9:16, 1:1 and 16:9.
+Scenes are deliberately not all alike. Claude is shown the page's pictures and chooses, per
+scene, between a page picture, stock footage from Vidmoat's library (it writes the search
+phrase), or type alone. Type-only scenes rotate through four compositions and three
+colour castings of the brand palette, so consecutive scenes never look the same.
+
+Six art directions (`LOOKS` in `server/motion.js`): **Punch**, **Sleek**, **Playful**,
+**Editorial** (serif headlines, hairlines, italics), **Neon** (glowing type, scanlines) and
+**Brutal** (heavy caps, hard frames, hazard bands). Four canvases: 9:16, 4:5, 1:1 and 16:9.
+Six scene formats: hook, feature, counter, checklist, customer quote and closing card. A
+quote is only used when its words appear on the page.
 
 ## Things to know before you put it in front of people
 
