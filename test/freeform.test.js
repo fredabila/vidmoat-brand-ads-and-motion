@@ -75,10 +75,16 @@ test('a designed scene is placed in its clip namespace with the palette as varia
 
 test('a design that fails the gate comes back as null, never an exception', async () => {
   const ctx = { scene: { headline: 'x', brief: 'y' }, canvas: FORMATS.vertical, safe: { x: 0, y: 0, width: 1, height: 1 }, palette: { background: '#000000', surface: '#111111', accent: '#ff0000', text: '#ffffff' }, look: { headFont: 'Inter', headWeight: 800, mood: 'm' }, brand: 'T' };
-  const client = (out) => ({ beta: { messages: { parse: async () => out } } });
+  const client = (out) => ({ beta: { messages: { parse: async () => ({ content: [], ...out }) } } });
   const bad = await designScene(client({ stop_reason: 'end_turn', parsed_output: { html: '<script>1</script>', css: '' } }), ctx);
   assert.equal(bad.design, null);
   assert.match(bad.reason, /not allowed/);
+  // A refused design gets one correction round, with the reason, and the fixed one is used.
+  const turns = [];
+  const fixer = { beta: { messages: { parse: async (req) => { turns.push(req.messages.length); return { stop_reason: 'end_turn', content: [{ type: 'text', text: '{}' }], parsed_output: turns.length === 1 ? { ...good, css: 'body{color:red}' } : good }; } } } };
+  const fixed = await designScene(fixer, ctx);
+  assert.ok(fixed.design);
+  assert.deepEqual(turns, [1, 3]);
   assert.equal((await designScene(client({ stop_reason: 'refusal', parsed_output: null }), ctx)).design, null);
   assert.equal((await designScene({ beta: { messages: { parse: async () => { throw new Error('boom'); } } } }, ctx)).design, null);
   assert.ok((await designScene(client({ stop_reason: 'end_turn', parsed_output: good }), ctx)).design);

@@ -62,21 +62,25 @@ function cleanHtml(html) {
 const SIMPLE = String.raw`\.sc-[\w-]+(?:\.sc-[\w-]+)*(?:::?[a-z-]+(?:\([\w\s+-]*\))?)*`;
 const SELECTOR = new RegExp(`^${SIMPLE}(?:\\s*[>+~]?\\s*${SIMPLE})*$`, 'i');
 
+/** Returns the cleaned stylesheet, or { error } naming the first thing that is not allowed. */
 function cleanCss(css) {
   const text = String(css ?? '').replace(/\/\*[\s\S]*?\*\//g, '');
-  if (/@/.test(text)) return null; // no @import, @keyframes, @font-face, @media
+  const no = (error) => ({ error });
+  if (/@/.test(text)) return no('@ rules (such as @keyframes or @media) are not allowed'); // also @import, @font-face
   const out = [];
   for (const block of text.split('}')) {
     if (!block.trim()) continue;
     const brace = block.indexOf('{');
-    if (brace < 0) return null;
+    if (brace < 0) return no('unbalanced braces');
     const selectors = block.slice(0, brace).split(',').map((sel) => sel.trim());
     const body = block.slice(brace + 1).trim();
-    if (!selectors.every((sel) => SELECTOR.test(sel))) return null;
-    if (body.includes('{') || BAD_VALUE.test(`;${body}`)) return null;
+    const badSelector = selectors.find((sel) => !SELECTOR.test(sel));
+    if (badSelector !== undefined) return no(`selector "${badSelector.slice(0, 80)}" is not made only of sc- classes`);
+    if (body.includes('{')) return no('nested rules are not allowed');
+    if (BAD_VALUE.test(`;${body}`)) return no(`a declaration in "${selectors[0].slice(0, 60)}" uses url(), animation, transition, position:fixed or a backslash`);
     out.push(`${selectors.join(',')}{${body}}`);
   }
-  return out.join('\n');
+  return { css: out.join('\n') };
 }
 
 /** Returns a safe {html, css} written in the `sc-` namespace, or null when the design cannot be trusted. */
@@ -92,8 +96,9 @@ export function checkDesign(design) {
   if (design.html.length > MAX_HTML || design.css.length > MAX_CSS) return no(`too long (${design.html.length} + ${design.css.length} characters)`);
   const html = cleanHtml(design.html);
   if (html === null) return no('markup uses an element or inline style that is not allowed');
-  const css = cleanCss(design.css);
-  if (css === null) return no('stylesheet has a selector or declaration that is not allowed');
+  const sheet = cleanCss(design.css);
+  if (sheet.error) return no(`stylesheet: ${sheet.error}`);
+  const { css } = sheet;
   if (!html.includes('class="sc-')) return no('classes are not in the sc- namespace');
   // The design has to be driven by the timeline, or it is a still.
   if (!/--vm-[tp]/.test(html + css)) return no('nothing moves on the timeline clock');
@@ -163,19 +168,28 @@ The scene:
  */
 export async function designScene(client, ctx, { model, log = () => {} } = {}) {
   try {
-    const response = await client.beta.messages.parse({
-      model: model ?? process.env.CLAUDE_MODEL ?? 'claude-opus-5-5',
-      max_tokens: 16000,
-      thinking: { type: 'adaptive' },
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      system: SYSTEM,
-      messages: [{ role: 'user', content: userPrompt(ctx) }],
-      output_config: { effort: 'medium', format: betaZodOutputFormat(DesignSchema) },
-    });
-    if (response.stop_reason === 'refusal' || !response.parsed_output) return { design: null, reason: `Claude stopped with ${response.stop_reason}` };
-    const checked = checkDesign(response.parsed_output);
-    if (!checked.design) log(`custom scene "${ctx.scene.headline}": ${checked.reason}`);
+    const messages = [{ role: 'user', content: userPrompt(ctx) }];
+    let checked = { design: null, reason: 'no attempt' };
+    // One correction round: if the gate refuses the design, Claude is told exactly why and fixes it.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await client.beta.messages.parse({
+        model: model ?? process.env.CLAUDE_MODEL ?? 'claude-opus-5-5',
+        max_tokens: 16000,
+        thinking: { type: 'adaptive' },
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        system: SYSTEM,
+        messages,
+        output_config: { effort: 'medium', format: betaZodOutputFormat(DesignSchema) },
+      });
+      if (response.stop_reason === 'refusal' || !response.parsed_output) return { design: null, reason: `Claude stopped with ${response.stop_reason}` };
+      checked = checkDesign(response.parsed_output);
+      if (checked.design) return checked;
+      log(`custom scene "${ctx.scene.headline}" (attempt ${attempt + 1}): ${checked.reason}`);
+      // The assistant turn goes back exactly as it came, thinking blocks included.
+      messages.push({ role: 'assistant', content: response.content },
+        { role: 'user', content: `The gate refused that design: ${checked.reason}. Send the whole design again with that fixed and everything else kept.` });
+    }
     return checked;
   } catch (err) {
     log(err instanceof Anthropic.APIError ? `custom scene: ${err.message}` : err);
