@@ -279,7 +279,8 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
       push({ op: 'setColor', clipId: `${id}_vid`, patch: { saturation: 90, brightness: 78 } });
     }
 
-    if (scene.kind === 'cta' && logo) {
+    // In a frame Claude owns, nothing is added that it did not ask for, the logo included.
+    if (scene.kind === 'cta' && logo && !owned) {
       // The mark sits above the closing line and settles in with a small overshoot.
       const size = Math.round(Math.min(W, H) * 0.15);
       const rect = { x: (W - size) / 2, y: layout.cta.y - size * 0.1, width: size, height: size };
@@ -300,7 +301,7 @@ export function compose({ storyboard, images = [], footage = [], voices = [], lo
     if (!(showImage && scene.kind === 'hook' && !owned) && !clip) push({ op: 'addHtmlElement', clipId: `${id}_back`, name: `Scene ${i + 1} background`, html: back.html, css: back.css, width: W, height: H, start: round(t), duration: d, trackIndex: tracks.back });
 
     // With a logo on the closing card, the words move down to make room for it.
-    const ctaLayout = scene.kind === 'cta' && logo
+    const ctaLayout = scene.kind === 'cta' && logo && !owned
       ? { ...layout, cta: { ...layout.cta, y: layout.cta.y + Math.min(W, H) * 0.1, height: layout.cta.height - Math.min(W, H) * 0.1 } }
       : layout;
     const front = frontLayer(`${id}f-`, {

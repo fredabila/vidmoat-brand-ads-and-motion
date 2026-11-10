@@ -78,14 +78,16 @@ test('the prompt lists images by number', () => {
 });
 
 test('Claude is shown the pictures, labelled by index, and unreadable ones do not sink the script', async () => {
+  const inline = (data) => ({ type: 'base64', media_type: 'image/jpeg', data });
   const withPics = { ...brief, images: [
-    { alt: 'watch', src: 'https://api.vidmoat.com/uploads/a.jpg', contentType: 'image/jpeg' },
-    { alt: 'vector', src: 'https://api.vidmoat.com/uploads/b.avif', contentType: 'image/avif' },
-    { alt: 'wrist', src: 'https://api.vidmoat.com/uploads/c.webp', contentType: 'image/webp' },
+    { alt: 'watch', src: 'https://api.vidmoat.com/uploads/a.jpg', vision: inline('AAAA') },
+    { alt: 'vector', src: 'https://api.vidmoat.com/uploads/b.avif', vision: null }, // a format Claude cannot read: described only
+    { alt: 'wrist', src: 'https://api.vidmoat.com/uploads/c.webp', vision: inline('BBBB') },
   ] };
   const content = buildUserContent(withPics, { goal: 'ad', sceneCount: 4, format: 'Vertical 9:16' });
-  assert.deepEqual(content.slice(1).map((b) => b.type === 'text' ? b.text : b.source.url), [
-    'Image 0:', 'https://api.vidmoat.com/uploads/a.jpg', 'Image 2:', 'https://api.vidmoat.com/uploads/c.webp',
+  // Pictures go inline as bytes, never as a link for the API to fetch.
+  assert.deepEqual(content.slice(1).map((b) => b.type === 'text' ? b.text : `${b.source.type}:${b.source.data}`), [
+    'Image 0:', 'base64:AAAA', 'Image 2:', 'base64:BBBB',
   ]);
 
   const seen = [];
@@ -99,4 +101,15 @@ test('Claude is shown the pictures, labelled by index, and unreadable ones do no
   assert.deepEqual(seen, [2, 0]);
   assert.equal(out.source, 'claude');
   assert.equal(out.storyboard.scenes[0].image, 2);
+  // The fallback is not silent: the result says the script was written without the pictures.
+  assert.match(out.picturesNote, /without seeing the pictures/);
+});
+
+test('a picture is sent inline with the type its bytes say it is', async () => {
+  const { visionSource } = await import('../server/pipeline.js');
+  const bytes = Buffer.from([1, 2, 3]);
+  assert.deepEqual(visionSource(bytes, 'jpg'), { type: 'base64', media_type: 'image/jpeg', data: 'AQID' });
+  assert.equal(visionSource(bytes, 'webp').media_type, 'image/webp');
+  assert.equal(visionSource(bytes, 'avif'), null); // not a format Claude reads
+  assert.equal(visionSource(Buffer.alloc(3_700_000), 'png'), null); // too large to send
 });

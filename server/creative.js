@@ -129,15 +129,14 @@ ${images}
 </page>`;
 }
 
-const VISION_TYPES = /^image\/(jpeg|png|gif|webp)$/i;
-
 /** The prompt as message content: the text, then each picture Claude can look at, labelled by index. */
 export function buildUserContent(brief, options, { withImages = true } = {}) {
   const content = [{ type: 'text', text: buildUserPrompt(brief, options) }];
   if (!withImages) return content;
   brief.images.forEach((img, i) => {
-    if (!img.src || !VISION_TYPES.test(img.contentType ?? '')) return;
-    content.push({ type: 'text', text: `Image ${i}:` }, { type: 'image', source: { type: 'url', url: img.src } });
+    // Sent inline (see visionSource in pipeline.js); a picture with no inline form is described only.
+    if (!img.vision) return;
+    content.push({ type: 'text', text: `Image ${i}:` }, { type: 'image', source: img.vision });
   });
   return content;
 }
@@ -321,21 +320,23 @@ export async function writeStoryboard(brief, { goal = 'ad', length = 'standard',
     messages: [{ role: 'user', content: buildUserContent(brief, { goal, sceneCount, format, freedom }, { withImages }) }],
     output_config: { effort: 'medium', format: betaZodOutputFormat(StoryboardSchema) },
   });
+  let picturesNote = null;
   try {
     let response;
     try {
       response = await ask(true);
     } catch (err) {
       // A picture the API cannot read (too large, odd encoding) must not cost the whole script.
-      if (!(err instanceof Anthropic.BadRequestError) || !brief.images.some((img) => img.src)) throw err;
+      if (!(err instanceof Anthropic.BadRequestError) || !brief.images.some((img) => img.vision)) throw err;
       log(`Claude could not read the pictures (${err.message}); asking again with descriptions only`);
+      picturesNote = `Claude wrote the script without seeing the pictures (${String(err.message).slice(0, 160)}).`;
       response = await ask(false);
     }
     if (response.stop_reason === 'refusal' || !response.parsed_output) {
       log(`Claude returned no storyboard (stop_reason: ${response.stop_reason})`);
       return { storyboard: heuristicStoryboard(brief, { sceneCount }), source: 'fallback', reason: `Claude stopped with ${response.stop_reason}` };
     }
-    return { storyboard: sanitizeStoryboard(response.parsed_output, brief, { sceneCount, allowCustom: freedom !== 'guided', directed: freedom === 'full' }), source: 'claude' };
+    return { storyboard: sanitizeStoryboard(response.parsed_output, brief, { sceneCount, allowCustom: freedom !== 'guided', directed: freedom === 'full' }), source: 'claude', picturesNote };
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
       log(`Claude credentials were refused: ${err.message}`);

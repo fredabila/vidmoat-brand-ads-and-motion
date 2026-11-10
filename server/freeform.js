@@ -215,7 +215,7 @@ export async function designScene(client, ctx, { model, log = () => {} } = {}) {
     const owned = Boolean(ctx.direction);
     const content = [{ type: 'text', text: owned ? ownedPrompt(ctx) : userPrompt(ctx) }];
     // In an owned frame the designer sees the picture it is composing around.
-    if (owned && ctx.picture) content.push({ type: 'image', source: { type: 'url', url: ctx.picture } });
+    if (owned && ctx.picture) content.push({ type: 'image', source: ctx.picture });
     const messages = [{ role: 'user', content }];
     let checked = { design: null, reason: 'no attempt' };
     // One correction round: if the gate refuses the design, Claude is told exactly why and fixes it.
@@ -242,7 +242,10 @@ export async function designScene(client, ctx, { model, log = () => {} } = {}) {
   } catch (err) {
     log(err instanceof Anthropic.APIError ? `custom scene: ${err.message}` : err);
     // A picture the API cannot read must not cost the scene its design: try once more without it.
-    if (err instanceof Anthropic.BadRequestError && ctx.picture) return designScene(client, { ...ctx, picture: null }, { model, log });
+    if (err instanceof Anthropic.BadRequestError && ctx.picture) {
+      const again = await designScene(client, { ...ctx, picture: null }, { model, log });
+      return { ...again, pictureDropped: String(err.message).slice(0, 160) };
+    }
     return { design: null, reason: err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}: ${String(err.message).slice(0, 160)}`.trim() : 'unexpected error' };
   }
 }

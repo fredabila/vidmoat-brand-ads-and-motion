@@ -110,7 +110,7 @@ test('with Claude as art director a designed scene owns the frame', () => {
       { ...blank, kind: 'cta', headline: 'Go', image: -1, cta: 'Go', design: sanitizeDesign(good) },
     ],
   };
-  const { commands } = compose({ storyboard: sb, images: [{ src: 'https://api.vidmoat.com/uploads/a.jpg', width: 1200, height: 800 }], canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks: { back: 4, media: 5, front: 6 } });
+  const { commands } = compose({ storyboard: sb, logo: { src: 'https://api.vidmoat.com/uploads/l.png', width: 512, height: 512 }, images: [{ src: 'https://api.vidmoat.com/uploads/a.jpg', width: 1200, height: 800 }], canvas: FORMATS.vertical, format: 'vertical', style: 'sleek', tracks: { back: 4, media: 5, front: 6 } });
   const get = (id) => commands.find((c) => c.clipId === id);
   assert.match(get('s0_back').html, /background:linear-gradient\(160deg,var\(--bg\),var\(--surface\)\)/);
   assert.match(get('s2_back').html, /background:var\(--bg\)/); // no background given: the brand colour
@@ -121,10 +121,37 @@ test('with Claude as art director a designed scene owns the frame', () => {
   assert.ok(!front.html.includes('f-sgs') && !front.html.includes('f-wp'), 'no brand bar and, with hard cuts, no wipe panels');
   assert.match(front.css, /font-family:'Bebas Neue'/);
   assert.match(front.css, /font-family:'Space Mono'/);
+  assert.equal(get('s2_logo'), undefined, 'no logo is added to a closing card Claude owns');
   // The scene without a design still gets the template: its own background and brand bar.
   assert.match(get('s1_front').html, /s1f-sgs/);
   for (const c of commands.filter((x) => x.op === 'addHtmlElement')) {
     const prefix = c.clipId.replace('_back', 'b-').replace('_front', 'f-');
     for (const rule of c.css.split('}').map((r) => r.trim()).filter(Boolean)) assert.ok(rule.startsWith(`.${prefix}`), rule.slice(0, 50));
   }
+});
+
+test('an owned scene with a picture shows it to the designer inline, and says so if it had to be dropped', async () => {
+  const ctx = {
+    scene: { kind: 'feature', headline: 'x', brief: 'y', sub: '', items: [], voice: '' }, canvas: FORMATS.vertical, safe: { x: 0, y: 0, width: 1, height: 1 },
+    palette: { background: '#000000', surface: '#111111', accent: '#ff0000', text: '#ffffff' }, brand: 'T',
+    direction: { concept: 'c', motif: 'm', headFont: 'Inter', bodyFont: 'Inter', transition: 'cut' }, index: 1, count: 3, neighbours: {}, media: 'one picture',
+    picture: { type: 'base64', media_type: 'image/png', data: 'AQID' },
+  };
+  const sent = [];
+  const ok = { beta: { messages: { parse: async (req) => { sent.push(req.messages[0].content.find((b) => b.type === 'image')?.source); return { stop_reason: 'end_turn', content: [], parsed_output: good }; } } } };
+  const out = await designScene(ok, ctx);
+  assert.ok(out.design && !out.pictureDropped);
+  assert.deepEqual(sent, [ctx.picture]);
+
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  let calls = 0;
+  const flaky = { beta: { messages: { parse: async (req) => {
+    calls += 1;
+    if (req.messages[0].content.some((b) => b.type === 'image')) throw new Anthropic.BadRequestError(400, { error: { message: 'bad image' } }, 'bad image', new Headers());
+    return { stop_reason: 'end_turn', content: [], parsed_output: good };
+  } } } };
+  const dropped = await designScene(flaky, ctx);
+  assert.ok(dropped.design);
+  assert.match(dropped.pictureDropped, /bad image/);
+  assert.equal(calls, 2);
 });

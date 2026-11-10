@@ -34,11 +34,27 @@ async function importImage(vidmoat, url, { fetchImpl = fetch, minWidth = 320, mi
   if (media?.mediaType !== 'image' || !media.url) return null;
   const res = await fetchImpl(media.url, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) return null;
-  const { width, height } = imageSize(new Uint8Array(await res.arrayBuffer()));
+  const bytes = Buffer.from(await res.arrayBuffer());
+  const { width, height, type } = imageSize(bytes);
   if (!width || !height || width < minWidth || height < minHeight) return null;
   const ratio = width / height;
   if (ratio > 3.4 || ratio < 0.3) return null; // banners and slivers make bad cards
-  return { src: media.url, width, height, contentType: media.contentType ?? '' };
+  return { src: media.url, width, height, contentType: media.contentType ?? '', vision: visionSource(bytes, type) };
+}
+
+// What Claude can look at: these four formats, up to 5 MB once encoded.
+const VISION_TYPES = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+const MAX_VISION_BYTES = 3_600_000;
+
+/**
+ * The picture as an inline image for Claude. The bytes are sent directly, and the
+ * type comes from the file itself: a link to the file, or a type taken from an HTTP
+ * header that disagrees with the bytes, is rejected by the API.
+ */
+export function visionSource(bytes, detectedType) {
+  const mediaType = VISION_TYPES[detectedType];
+  if (!mediaType || bytes.length > MAX_VISION_BYTES) return null;
+  return { type: 'base64', media_type: mediaType, data: bytes.toString('base64') };
 }
 
 async function importAssets(brief, vidmoat, deps) {
@@ -48,12 +64,18 @@ async function importAssets(brief, vidmoat, deps) {
     brief.logo ? importImage(vidmoat, brief.logo, { ...deps, minWidth: 96, minHeight: 96 }).catch(() => null) : null,
   ]);
   const images = [];
+  // The encoded pictures stay on the server, keyed by file: they are for Claude, not for the page.
+  const pictures = new Map();
   candidates.forEach((img, i) => {
-    if (imported[i] && images.length < MAX_IMAGES) images.push({ ...imported[i], alt: img.alt, hint: img.hint });
+    if (!imported[i] || images.length >= MAX_IMAGES) return;
+    const { vision, ...asset } = imported[i];
+    if (vision) pictures.set(asset.src, vision);
+    images.push({ ...asset, alt: img.alt, hint: img.hint });
   });
   // A logo wider than 2:1 is a wordmark on a transparent strip; the brand name in type reads better.
   const squareLogo = logo && logo.width / logo.height < 2 && logo.height / logo.width < 2 ? logo : null;
-  return { images, logo: squareLogo };
+  if (squareLogo) delete squareLogo.vision;
+  return { images, logo: squareLogo, pictures };
 }
 
 async function findMusic(vidmoat, query, videoSeconds) {
@@ -128,7 +150,7 @@ async function attachFootage(vidmoat, storyboard, format, log) {
  * Have Claude design every custom scene, all at once. A scene whose design does
  * not come back, or does not pass the gate, becomes an ordinary feature scene.
  */
-async function designCustomScenes(client, storyboard, { format, style, images = [], log }) {
+async function designCustomScenes(client, storyboard, { format, style, images = [], pictures = new Map(), log }) {
   const canvas = FORMATS[format];
   const look = LOOKS[style];
   const safe = layoutFor(format, canvas).solo;
@@ -145,10 +167,11 @@ async function designCustomScenes(client, storyboard, { format, style, images = 
       neighbours: { before: line(storyboard.scenes[i - 1]), after: line(storyboard.scenes[i + 1]) },
       media: picture ? `one picture, ${picture.width} x ${picture.height} pixels, attached${picture.alt ? ` (${picture.alt})` : ''}`
         : scene.visual ? `stock footage of "${scene.visual}" fills the frame behind you` : null,
-      picture: picture && /^image\/(jpeg|png|gif|webp)$/i.test(picture.contentType ?? '') ? picture.src : null,
+      picture: picture ? pictures.get(picture.src) ?? null : null,
     } : { ...base, look };
     const out = client ? await designScene(client, ctx, { log }) : { design: null, reason: 'Claude is not connected' };
     scene.design = out.design;
+    if (out.pictureDropped) notes.push(`Scene ${i + 1}: Claude designed around its picture without seeing it (${out.pictureDropped}).`);
     if (!scene.design) {
       notes.push(`Scene ${i + 1} was meant to be designed by Claude but fell back to a standard scene (${out.reason}).`);
       if (scene.kind === 'custom') { scene.kind = 'feature'; scene.items = []; }
@@ -214,14 +237,14 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   emit('read', 'done', brief.title || brief.domain);
 
   emit('media', 'active');
-  const assets = await importAssets(brief, vidmoat, fetchImpl ? { fetchImpl } : undefined);
+  const { pictures, ...assets } = await importAssets(brief, vidmoat, fetchImpl ? { fetchImpl } : undefined);
   // From here on, image numbers mean "usable, imported pictures".
-  brief.images = assets.images.map((img) => ({ alt: img.alt, hint: img.hint, width: img.width, height: img.height, src: img.src, contentType: img.contentType }));
+  brief.images = assets.images.map((img) => ({ alt: img.alt, hint: img.hint, width: img.width, height: img.height, src: img.src, contentType: img.contentType, vision: pictures.get(img.src) ?? null }));
   emit('media', 'done', `${assets.images.length} image${assets.images.length === 1 ? '' : 's'}`);
 
   emit('write', 'active');
   const freedom = ['guided', 'free', 'full'].includes(input.freedom) ? input.freedom : 'full';
-  const { storyboard, source, reason } = await writeStoryboard(brief, {
+  const { storyboard, source, reason, picturesNote } = await writeStoryboard(brief, {
     goal: input.goal, length, format: FORMATS[format].label, freedom, client: anthropic, log,
   });
   emit('write', 'done', source === 'claude' ? `${storyboard.scenes.length} scenes` : 'Written from the page text');
@@ -233,7 +256,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
     input.music === false ? null : findMusic(vidmoat, storyboard.musicQuery, 30).catch((err) => { log(`music: ${err.message}`); return null; }),
     attachFootage(vidmoat, storyboard, format, log),
     input.voiceover === false ? [] : recordVoices(vidmoat, storyboard, voiceId, { fetchImpl, log }),
-    designCustomScenes(anthropic ?? (claudeConfigured() ? new Anthropic() : null), storyboard, { format, style, images: assets.images, log }),
+    designCustomScenes(anthropic ?? (claudeConfigured() ? new Anthropic() : null), storyboard, { format, style, images: assets.images, pictures, log }),
   ]);
   assets.footage = footage;
   assets.voices = voices;
@@ -249,7 +272,7 @@ export async function buildVideo(input, { vidmoat, emit = () => {}, anthropic, f
   const composed = compose({ storyboard, images: assets.images, footage, voices, logo: assets.logo, canvas, format, style, tracks, music, domain: brief.domain });
   const applied = await applyAll(vidmoat, projectId, composed.commands);
   const { lint } = applied;
-  const problems = [...designNotes, ...applied.problems];
+  const problems = [...(picturesNote ? [picturesNote] : []), ...designNotes, ...applied.problems];
   const document = await vidmoat.getDocument(projectId);
   emit('build', 'done', `${composed.duration.toFixed(1)}s`);
 
